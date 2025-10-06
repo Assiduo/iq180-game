@@ -1,7 +1,5 @@
 /* ----------------------------------------------------------------
-   IQ180 Galaxy Glass Refined Edition 2.0
-   Author: ChatGPT (2025)
-   Description: Responsive glassmorphic UI with perfect spacing & typography
+   IQ180 Galaxy Glass Refined Edition 1.0
 -------------------------------------------------------------------*/
 
 /* RESET ----------------------------------------------------------*/
@@ -485,4 +483,260 @@ body {
 .solution-highlight {
   color: #fff;
   font-weight: bold;
+}
+
+.lobby-list {
+  margin: 20px auto;
+  padding: 15px;
+  width: 280px;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.lobby-list h3 {
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.lobby-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.lobby-list li {
+  text-align: center;
+  padding: 4px 0;
+  font-weight: 500;
+}
+.waiting-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  text-align: center;
+  min-height: 100vh;
+}
+.waiting-title {
+  color: #ffffff;
+  font-weight: 700;
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.7);
+  letter-spacing: 1px;
+  margin-bottom: 1rem;
+}
+
+
+.waiting-box {
+  width: 320px;
+  padding: 1rem 2rem;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 0 20px rgba(0, 255, 255, 0.2);
+  color: white;
+}
+
+.waiting-box ul {
+  list-style: none;
+  padding: 0;
+}
+
+.waiting-box li {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.secondary-btn {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.4);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  margin-top: 1rem;
+  transition: all 0.3s;
+}
+
+.secondary-btn:hover {
+  background: rgba(255,255,255,0.2);
+}
+
+.online-box {
+  margin: 1rem auto;
+  padding: 1rem 1.5rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  width: 80%;
+  max-width: 500px;
+  text-align: left;
+  box-shadow: 0 0 10px rgba(0, 200, 255, 0.2);
+}
+
+.online-title {
+  color: #fff;
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-bottom: 0.6rem;
+}
+
+.online-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.online-list li {
+  color: #eaf6ff;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.online-list li.self {
+  color: #00d9ff;
+  font-weight: 600;
+}
+
+.you-label {
+  color: #00ffff;
+  font-weight: 700;
+}
+
+.online-empty {
+  color: rgba(255, 255, 255, 0.6);
+  font-style: italic;
+  text-align: center;
+}
+
+.select-mode-title {
+  margin-top: 1.5rem;
+  font-size: 2rem;
+  color: #fff;
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.4);
+}
+
+
+.countdown-popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.85);
+  border-radius: 16px;
+  padding: 40px 60px;
+  text-align: center;
+  font-size: 1.8rem;
+  z-index: 1000;
+  color: white;
+  border: 2px solid rgba(0, 255, 255, 0.2);
+}
+
+
+.countdown-number {
+  font-size: 4rem;
+  margin-top: 10px;
+  color: #00ffcc;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.7; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.resume-count {
+  margin-top: 10px;
+  font-size: 1.1rem;
+  color: #00ffee;
+  font-weight: 600;
+  text-align: center;
+  animation: pulse 1s infinite alternate;
+}
+
+@keyframes pulse {
+  from { opacity: 0.6; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1.05); }
+}
+.waiting-turn {
+  text-align: center;
+  margin-top: 3rem;
+  padding: 2rem 3rem;
+  border-radius: 1.5rem;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 15px rgba(0, 255, 255, 0.15);
+  color: #fff;
+  max-width: 400px;
+  margin-inline: auto;
+}
+
+.waiting-stats p {
+  margin: 0.5rem 0;
+  color: #ddd;
+  font-size: 1.05rem;
+}
+
+.waiting-note {
+  margin-top: 1rem;
+  font-size: 1rem;
+  color: #ccc;
+}
+.waiting-turn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  padding: 2rem;
+  text-align: center;
+}
+
+.waiting-title {
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+  color: #eee;
+}
+
+.waiting-timer .time-left {
+  font-size: 4rem;
+  font-weight: 700;
+  color: #00ffcc;
+  margin: 1rem 0;
+}
+
+.time-critical {
+  color: #ff4444;
+  animation: pulse 0.8s infinite alternate;
+}
+
+@keyframes pulse {
+  from {
+    transform: scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.05);
+    opacity: 0.7;
+  }
+}
+
+.hint-text {
+  font-size: 1rem;
+  color: #aaa;
+  margin-top: 10px;
+}
+
+.waiting-timer .time-left {
+  font-size: 4rem;
+  font-weight: bold;
+  color: #00ffcc;
+  margin: 1rem 0;
+}
+
+.hint-text {
+  font-size: 1rem;
+  color: #ccc;
 }

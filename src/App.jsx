@@ -18,6 +18,9 @@ import wrongSoundFile from "./sounds/wrong.mp3";
 import timeoutSoundFile from "./sounds/timeout.mp3";
 import bgmFile from "./sounds/bgm.mp3";
 
+import { io } from "socket.io-client";
+const socket = io("http://localhost:4000");
+
 export default function App() {
   /* 🌍 MULTI-LANGUAGE */
   const [lang, setLang] = useState("en");
@@ -140,6 +143,8 @@ export default function App() {
   };
   const [theme, setTheme] = useState("galaxyBlue");
   const [dropdownOpen, setDropdownOpen] = useState(null);
+  // 🧩 Multiplayer waiting room
+  const [waitingPlayers, setWaitingPlayers] = useState([]);
 
   /* 🔊 SOUND ENGINE */
   const [muted, setMuted] = useState(false);
@@ -180,26 +185,39 @@ export default function App() {
     sounds[type]?.play();
   };
 
-  /* ⚙️ GAME STATE */
-  const [page, setPage] = useState("login");
-  const [nickname, setNickname] = useState("");
-  const [mode, setMode] = useState("easy");
-  const [score, setScore] = useState(0);
-  const [rounds, setRounds] = useState(0);
-  const [digits, setDigits] = useState([]);
-  const [operators, setOperators] = useState([]);
-  const [disabledOps, setDisabledOps] = useState([]);
-  const [target, setTarget] = useState(0);
-  const [expression, setExpression] = useState("");
-  const [timeLeft, setTimeLeft] = useState(60);
-  const [running, setRunning] = useState(false);
-  const [resultPopup, setResultPopup] = useState(null);
-  const [solution, setSolution] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [lastWasNumber, setLastWasNumber] = useState(false);
-  const [lastWasSqrt, setLastWasSqrt] = useState(false);
-  const timerRef = useRef(null);
-  const [solutionExpr, setSolutionExpr] = useState(""); // ✅ เก็บสมการเฉลยจริง
+ /* ⚙️ GAME STATE */
+const [page, setPage] = useState("login");
+const [nickname, setNickname] = useState("");
+const [mode, setMode] = useState("easy");
+const [score, setScore] = useState(0);
+const [rounds, setRounds] = useState(0);
+const [totalPlayers, setTotalPlayers] = useState(0); // ✅ เก็บจำนวนผู้เล่นในรอบ
+
+const [digits, setDigits] = useState([]);
+const [operators, setOperators] = useState([]);
+const [disabledOps, setDisabledOps] = useState([]);
+const [target, setTarget] = useState(0);
+const [expression, setExpression] = useState("");
+
+const [resultPopup, setResultPopup] = useState(null);
+const [solution, setSolution] = useState(null);
+const [history, setHistory] = useState([]);
+const [lastWasNumber, setLastWasNumber] = useState(false);
+const [lastWasSqrt, setLastWasSqrt] = useState(false);
+const [solutionExpr, setSolutionExpr] = useState(""); // ✅ เก็บสมการเฉลยจริง
+
+
+/* 👥 Multiplayer & Room State */
+const [playerList, setPlayerList] = useState([]); // รายชื่อผู้เล่นทั้งหมด (ออนไลน์)
+const [canStart, setCanStart] = useState(false); // ห้องพร้อมเริ่มหรือยัง
+const [preGameInfo, setPreGameInfo] = useState(null); // ข้อมูลก่อนเริ่ม (starter, mode, players)
+const [countdown, setCountdown] = useState(0); // นับถอยหลังก่อนเริ่มเกม
+const [showCountdown, setShowCountdown] = useState(false); // แสดง countdown popup หรือไม่
+const [gameState, setGameState] = useState({}); // สถานะเกมกลาง (turn, order, ฯลฯ)
+const [isMyTurn, setIsMyTurn] = useState(false); // ตอนนี้เป็นตาเราไหม
+
+const [autoResumeCount, setAutoResumeCount] = useState(null);
+
 
 
 /* 🎲 GAME GENERATOR (FINAL FIXED VERSION) */
@@ -237,6 +255,8 @@ const generateProblem = (mode) => {
   setDigits(selected);
   setTarget(result);
   setSolutionExpr(expr);
+
+  return { digits: selected, operators: allOps, target: result, mode, disabledOps: dis };
 };
 
 /* 🧮 CREATE EXPRESSION AND CALCULATE TARGET (SAFE & INTEGER ONLY) */
@@ -311,74 +331,196 @@ const createExpressionWithResult = (numbers, ops, mode, disabledOps = []) => {
     setSolution(null);
     setPage("game");
   };
+/* 🕒 TIMER (Client-side synced with Player 1, global for all players) */
+const [baseTime, setBaseTime] = useState(null);
+const [timeLeft, setTimeLeft] = useState(60);
+const [running, setRunning] = useState(false);
+const timerRef = useRef(null);
 
-  /* 🕒 TIMER */
-  useEffect(() => {
-    if (!running) return;
-    if (timeLeft <= 0) {
-      playSound("timeout");
+/* ✅ เมื่อถึงตาเราเล่น */
+socket.on("yourTurn", ({ mode }) => {
+  console.log("🎯 It's your turn!");
+  setIsMyTurn(true);
+
+  // ถ้าเราเป็น Player 1 → ส่งเวลาเริ่มให้ทุกคน
+  if (gameState?.turnOrder?.[0] === nickname) {
+    const startTime = Date.now();
+    socket.emit("syncTimer", { mode, startTime });
+    console.log("🕒 Host started global timer:", new Date(startTime).toLocaleTimeString());
+  }
+
+  // ตั้งเวลาเริ่มในเครื่องเราเอง
+  const now = Date.now();
+  setBaseTime(now);
+  setTimeLeft(60);
+  setRunning(true);
+});
+
+/* 🕛 รับเวลาจาก host เพื่อ sync (ทุกคนรวมถึงคนรอ) */
+socket.on("syncTimer", ({ mode, startTime }) => {
+  console.log(`🕛 Synced timer from host: ${new Date(startTime).toLocaleTimeString()}`);
+
+  // ทุกคนใช้ baseTime เดียวกัน
+  setBaseTime(startTime);
+  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  const remain = Math.max(60 - elapsed, 0);
+
+  setTimeLeft(remain);
+  setRunning(true);
+});
+
+/* 🔁 เมื่อสลับเทิร์น ให้หยุด timer ชั่วคราว */
+socket.on("turnSwitch", (data) => {
+  console.log("🔁 Turn switched to:", data.nextTurn);
+  setGameState((prev) => ({
+    ...prev,
+    currentTurn: data.nextTurn,
+  }));
+  setIsMyTurn(data.nextTurn === nickname);
+  setRunning(false);
+});
+
+/* 🕒 จับเวลาแบบ global ทุก client (รวมถึงคนรอ) */
+useEffect(() => {
+  if (!running || baseTime === null) return;
+
+  const tick = () => {
+    const elapsed = Math.floor((Date.now() - baseTime) / 1000);
+    const remaining = Math.max(60 - elapsed, 0);
+    setTimeLeft(remaining);
+
+    // ถ้าเวลาเหลือ 0 → หมดเวลา
+    if (remaining <= 0) {
+      clearInterval(timerRef.current);
       setRunning(false);
-      stopTimer();
       setResultPopup("timeout");
-      const solved = findSolution(digits, target, disabledOps);
-      setSolution(solved ? solved : "No simple solution found.");
-      setRounds((r) => r + 1);
-      return;
-    }
-    timerRef.current = setTimeout(() => setTimeLeft((t) => t - 1), 1000);
-    return () => clearTimeout(timerRef.current);
-  }, [timeLeft, running]);
+      playSound("timeout");
 
-  const stopTimer = () => {
-    clearTimeout(timerRef.current);
-    setRunning(false);
-  };
+      // แจ้ง server ว่าหมดเวลา
+      socket.emit("answerResult", {
+        nickname,
+        result: "timeout",
+        correct: false,
+        score,
+        round: rounds + 1,
+        mode,
+      });
 
-  /* ✅ CHECK ANSWER */
-  const checkAnswer = () => {
-    const usedDigits = expression.split("").filter((ch) => /\d/.test(ch));
-    const allUsed = digits.every((d) => usedDigits.includes(String(d)));
-
-    if (!allUsed) {
-      setResultPopup("invalid");
-      return;
-    }
-
-    try {
-      // ✅ แปลง √ ให้เป็น Math.sqrt(...) และแทร่วงเล็บ
-      const clean = expression
-        .replace(/×/g, "*")
-        .replace(/÷/g, "/")
-        .replace(/\^/g, "**")
-        .replace(/√(\d+|\([^()]+\))/g, "Math.sqrt($1)");
-
-        const result = eval(clean);
-
-        // ✅ ต้องเป็นจำนวนเต็มเท่านั้น
-        if (!Number.isInteger(result)) {
-          setResultPopup("invalid");
-          return;
+      // Auto resume 3 วินาที
+      let count = 3;
+      setAutoResumeCount(count);
+      const countdown = setInterval(() => {
+        count -= 1;
+        setAutoResumeCount(count);
+        if (count <= 0) {
+          clearInterval(countdown);
+          setAutoResumeCount(null);
+          setResultPopup(null);
+          socket.emit("resumeGame", { mode });
+          setIsMyTurn(false);
         }
-        
-      const uniqueOK = new Set(usedDigits).size === usedDigits.length;
-      const isInteger = Number.isInteger(result);
-
-      if (isInteger && result === target && uniqueOK) {
-        playSound("correct");
-        setScore((s) => s + 1);
-        setResultPopup("correct");
-      } else {
-        playSound("wrong");
-        setResultPopup("wrong");
-      }
-
-      stopTimer();
-      setRounds((r) => r + 1);
-      setHistory((h) => [...h, { round: rounds + 1, result, ok: result === target }]);
-    } catch {
-      setResultPopup("invalid");
+      }, 1000);
     }
   };
+
+  timerRef.current = setInterval(tick, 1000);
+  return () => clearInterval(timerRef.current);
+}, [running, baseTime]);
+
+/* ✅ CHECK ANSWER (Smart Validation) */
+const checkAnswer = () => {
+  try {
+    const expr = expression.trim();
+
+    // ❌ ถ้าไม่มีเลขเลย
+    if (!/\d/.test(expr)) {
+      setResultPopup("invalid");
+      return;
+    }
+
+    // ❌ ถ้าเริ่มต้นด้วย operator ที่ไม่ใช่ √ หรือ (
+    if (/^[+\-×÷*/)]/.test(expr)) {
+      setResultPopup("invalid");
+      return;
+    }
+
+    // ❌ ถ้าจบด้วย operator ที่ไม่ใช่ ) 
+    if (/[+\-×÷*/(]$/.test(expr)) {
+      setResultPopup("invalid");
+      return;
+    }
+
+    // ✅ แปลงสัญลักษณ์
+    const clean = expr
+      .replace(/×/g, "*")
+      .replace(/÷/g, "/")
+      .replace(/\^/g, "**")
+      .replace(/√(\d+|\([^()]+\))/g, "Math.sqrt($1)");
+
+    // 🧮 คำนวณผลลัพธ์
+    const result = eval(clean);
+    const correct = Number.isFinite(result) && Math.abs(result - target) < 1e-9;
+
+    if (correct) {
+      playSound("correct");
+      setScore((s) => s + 1);
+      setResultPopup("correct");
+    } else {
+      playSound("wrong");
+      setResultPopup("wrong");
+    }
+
+    // ✅ บันทึกลงประวัติ
+    setHistory((h) => [
+      ...h,
+      { round: rounds + 1, result, ok: correct },
+    ]);
+
+    // ✅ ส่งข้อมูลขึ้น server
+    if (socket && socket.connected) {
+      socket.emit("answerResult", {
+        nickname,
+        mode,
+        result,
+        correct,
+        score: correct ? score + 1 : score,
+        round: rounds + 1,
+      });
+    }
+
+// 🧮 หลังตรวจคำตอบเสร็จ
+if (correct) {
+  playSound("correct");
+  setScore((s) => s + 1);
+  setResultPopup("correct");
+} else {
+  playSound("wrong");
+  setResultPopup("wrong");
+}
+
+// ✅ เริ่ม auto-resume countdown
+let count = 3;
+setAutoResumeCount(count);
+
+const timer = setInterval(() => {
+  count -= 1;
+  setAutoResumeCount(count);
+  if (count <= 0) {
+    clearInterval(timer);
+    setAutoResumeCount(null);
+    setResultPopup(null);
+
+    // 🔁 แจ้ง server ว่าสลับเทิร์นไปคนต่อไป
+    socket.emit("resumeGame", { mode });
+    setIsMyTurn(false);
+  }
+}, 1000);
+
+  } catch (err) {
+    console.error("❌ Expression error:", err);
+    setResultPopup("invalid");
+  }
+};
 
   /* 🧠 หาวิธีเฉลยที่ถูกต้องตามเครื่องหมายที่เปิดใช้ */
   const findSolution = (digits, target, disabledOps = []) => {
@@ -426,6 +568,190 @@ const createExpressionWithResult = (numbers, ops, mode, disabledOps = []) => {
   };
 
   const currentTheme = themes[theme];
+
+/* 🧩 SOCKET.IO CLIENT CONNECTION */
+useEffect(() => {
+  if (!socket) return;
+
+  // 🟢 เมื่อเชื่อมต่อสำเร็จ
+  socket.on("connect", () => {
+    console.log("🟢 Connected to server");
+    if (page === "mode" && nickname.trim()) {
+      socket.emit("setNickname", nickname); // ✅ ออนไลน์เมื่อเข้า mode page
+      console.log(`✅ ${nickname} marked as online`);
+    }
+  });
+
+  // 👥 รายชื่อผู้เล่นทั้งหมด (หน้าเลือกโหมด)
+  socket.on("playerList", (list) => {
+    console.log("👥 Players online:", list);
+    setPlayerList(list);
+  });
+
+  // 🕹️ รายชื่อใน waiting room เดียวกัน
+  socket.on("waitingList", (data) => {
+    if (data.mode === mode) {
+      console.log(`🕹️ Waiting list for ${mode}:`, data.players);
+      setWaitingPlayers(data.players);
+    }
+  });
+
+  // ✅ เมื่อห้องพร้อมเริ่ม
+  socket.on("canStart", (data) => {
+    if (data.mode === mode) setCanStart(data.canStart);
+  });
+
+  // ⏳ ก่อนเริ่มเกม (countdown + starter info)
+  socket.on("preGameStart", (data) => {
+    console.log("⏳ Pre-game starting:", data);
+
+    // แสดง popup countdown
+    setPreGameInfo({
+      mode: data.mode,
+      starter: data.starter,
+      players: data.players,
+    });
+
+    let counter = data.countdown;
+    setCountdown(counter);
+    setShowCountdown(true);
+
+    const timer = setInterval(() => {
+      counter -= 1;
+      setCountdown(counter);
+      if (counter <= 0) {
+        clearInterval(timer);
+        setShowCountdown(false);
+      }
+    }, 1000);
+  });
+
+  socket.on("gameStart", (data) => {
+    console.log("🚀 Game started from server:", data);
+  
+    setDigits(data.digits || []);
+    setOperators(data.operators || []);
+    setDisabledOps(data.disabledOps || []);
+    setTarget(data.target || 0);
+    setMode(data.mode || "easy");
+  
+    // ตั้งสถานะเกม
+    setGameState(data);
+    const myTurn = data.currentTurn === nickname;
+    setIsMyTurn(myTurn);
+  
+    // ให้ทุกคนเข้าเกมพร้อมกัน
+    setPage("game");
+  
+    // ถ้าเป็นคนเล่น → เปิด timer
+    if (myTurn) {
+      setRunning(true);
+      setTimeLeft(data.mode === "hard" ? 30 : 60);
+    } else {
+      // ถ้าเป็นคนรอ → หยุด timer (เพื่อไม่ให้เวลาวิ่งมั่ว)
+      setRunning(false);
+      setTimeLeft(data.mode === "hard" ? 30 : 60);
+    }
+  
+    // รีเซ็ตสถานะพื้นฐาน
+    setExpression("");
+    setLastWasNumber(false);
+    setLastWasSqrt(false);
+    setResultPopup(null);
+    setSolution(null);
+    setScore(0);
+    setRounds(0);
+  
+    console.log("🎯 Current turn:", data.currentTurn);
+  });
+  
+  
+  // 🔁 สลับเทิร์นผู้เล่น
+  socket.on("turnSwitch", (data) => {
+    console.log("🔁 Turn switched:", data);
+    setGameState((prev) => ({
+      ...prev,
+      currentTurn: data.nextTurn,
+      currentTurnIndex: data.currentTurnIndex,
+    }));
+    setIsMyTurn(data.nextTurn === nickname);
+  });
+
+  // 🎯 เมื่อถึงตาเราเล่น (server ส่งสัญญาณ yourTurn)
+  socket.on("yourTurn", ({ mode }) => {
+    console.log("🧩 It's now your turn to generate a problem!");
+
+    // ✅ สร้างโจทย์ใหม่เฉพาะของเรา
+    const gameData = generateProblem(mode);
+    setDigits(gameData.digits);
+    setOperators(gameData.operators);
+    setDisabledOps(gameData.disabledOps);
+    setTarget(gameData.target);
+    setMode(gameData.mode);
+
+    // ✅ ตั้งค่า state สำหรับเริ่มเล่น
+    setRunning(true);
+    setIsMyTurn(true);
+    setExpression("");
+    setLastWasNumber(false);
+    setLastWasSqrt(false);
+    setResultPopup(null);
+    setSolution(null);
+    setPage("game");
+    
+      // ✅ รีเซ็ตทุก state สำคัญก่อนเริ่มเทิร์นใหม่
+  setDisabledOps([]);
+  setResultPopup(null);
+  setExpression("");
+  setLastWasNumber(false);
+  setLastWasSqrt(false);
+  setSolutionExpr("");
+  setRunning(true);
+
+
+    // ✅ อัปเดต gameState ให้ currentTurn เป็นเราด้วย
+    setGameState((prev) => ({ ...prev, currentTurn: nickname }));
+
+    console.log("🎮 Your turn started with target:", gameData.target);
+  });
+
+  // 🧮 ผลลัพธ์ของคำตอบ (sync จากผู้เล่นอื่น)
+  socket.on("answerResult", (data) => {
+    console.log("📩 Answer result:", data);
+
+    // ป้องกันไม่ให้ popup ซ้อนกับฝั่งตัวเอง
+    if (data.nickname === nickname) return;
+
+    // แค่โชว์ว่ามีคนเล่น (ไม่ต้องโชว์เฉลย)
+    if (data.correct) {
+      console.log(`✅ ${data.nickname} answered correctly!`);
+    } else {
+      console.log(`❌ ${data.nickname} answered wrong.`);
+    }
+  });
+
+  // 🚪 เมื่อผู้เล่นออกจากห้องหรือ disconnect
+  socket.on("playerLeft", (data) => {
+    console.log(`🚪 ${data.nickname} left ${data.mode}`);
+    if (data.mode === mode) {
+      setWaitingPlayers((prev) => prev.filter((p) => p !== data.nickname));
+    }
+  });
+
+  // 🧹 cleanup (สำคัญมาก ป้องกัน event ซ้ำ)
+  return () => {
+    socket.off("connect");
+    socket.off("playerList");
+    socket.off("waitingList");
+    socket.off("canStart");
+    socket.off("preGameStart");
+    socket.off("gameStart");
+    socket.off("turnSwitch");
+    socket.off("yourTurn");
+    socket.off("answerResult");
+    socket.off("playerLeft");
+  };
+}, [nickname, page, mode]);
 
   /* 🌌 MAIN UI */
   return (
@@ -540,19 +866,35 @@ const createExpressionWithResult = (numbers, ops, mode, disabledOps = []) => {
         </div>
       </div>
 
-      {/* 🔙 Back Button */}
-      {page !== "login" && (
-        <button
-          className="back-btn"
-          onClick={() => {
-            playSound("click");
-            stopTimer();
-            setPage("login");
-          }}
-        >
-          <FaArrowLeft />
-        </button>
-      )}
+{/* 🔙 Smart Global Back Button */}
+{page !== "login" && (
+  <button
+    className="back-btn"
+    onClick={() => {
+      playSound("click");
+
+      if (page === "game") {
+        // ⏹ ถ้าอยู่หน้าเกม — หยุดจับเวลาและกลับไปเลือกโหมด
+        stopTimer();
+        socket.emit("leaveGame", { nickname, mode });
+        setPage("mode");
+      } 
+      else if (page === "mode" || page === "waiting") {
+        // ❌ ถ้าอยู่หน้าเลือกโหมด หรือรอคน — ออกจากระบบจริง
+        socket.emit("leaveLobby", nickname);
+        socket.disconnect();
+        setPage("login");
+      } 
+      else {
+        // fallback safety
+        setPage("login");
+      }
+    }}
+  >
+    <FaArrowLeft />
+  </button>
+)}
+
       {/* ⚡ PAGE SWITCHER */}
       <AnimatePresence mode="wait">
         {/* LOGIN PAGE ------------------------------------------------ */}
@@ -567,208 +909,450 @@ const createExpressionWithResult = (numbers, ops, mode, disabledOps = []) => {
                 value={nickname}
                 onChange={(e) => setNickname(e.target.value)}
               />
-              <button
-                className="main-btn"
-                onClick={() => {
-                  if (nickname.trim()) {
-                    playSound("click");
-                    setPage("mode");
-                  }
-                }}
-              >
-                {T.start} <FaArrowRight />
-              </button>
+<button
+  className="main-btn"
+  onClick={() => {
+    if (nickname.trim()) {
+      playSound("click");
+      socket.emit("setNickname", nickname); // ✅ แจ้ง server ทันทีว่า player online แล้ว
+      setPage("mode");
+    }
+  }}
+>
+  {T.start} <FaArrowRight />
+</button>
+
             </div>
           </motion.div>
         )}
 
-        {/* MODE PAGE ------------------------------------------------ */}
-        {page === "mode" && (
-          <motion.div key="mode" className="mode-page" {...fade}>
-            <h2 className="big-player">
-              {T.playerName}: <span>{nickname}</span>
-            </h2>
-            <h1>{T.selectMode}</h1>
-            <div className="mode-buttons">
-              <button
-                className="mode-btn glass-btn"
-                onClick={() => {
-                  playSound("click");
-                  startGame("easy");
-                }}
-              >
-                {T.easy}
-              </button>
-              <button
-                className="mode-btn glass-btn"
-                onClick={() => {
-                  playSound("click");
-                  startGame("hard");
-                }}
-              >
-                {T.hard}
-              </button>
-            </div>
-          </motion.div>
-        )}
+{/* MODE PAGE ------------------------------------------------ */}
+{page === "mode" && (
+  <motion.div key="mode" className="mode-page" {...fade}>
+    <h2 className="big-player">
+      {T.playerName}: <span>{nickname}</span>
+    </h2>
 
-        {/* GAME PAGE ------------------------------------------------ */}
-        {page === "game" && (
-          <motion.div key="game" className="game-page" {...fade}>
-            <div className="game-header">
-              <h2 className="big-player">
-                {T.playerName}: <span>{nickname}</span>
-              </h2>
+    {/* 👥 รายชื่อผู้เล่นออนไลน์ */}
+    <div className="online-box glass-card">
+      <h3 className="online-title">
+        👥 {lang === "th" ? "ผู้เล่นที่ออนไลน์" : lang === "zh" ? "在线玩家" : "Players Online"}
+      </h3>
 
-              <div className="game-stats">
-                <h1 className="target-title">
-                  {T.target}: <span className="highlight">{target}</span>
-                </h1>
-                <p
-                  className={
-                    timeLeft <= 10 ? "time-score time-low" : "time-score"
-                  }
-                >
-                  {T.timeLeft}: {timeLeft}s
-                </p>
-                <p>
-                  {T.score}: {score}
-                </p>
-              </div>
-            </div>
+      {playerList && playerList.length > 0 ? (
+        <ul className="online-list">
+          {playerList.map((p, i) => (
+            <li key={i} className={p === nickname ? "self" : ""}>
+              {p === nickname ? (
+                <span className="you-label">
+                  {lang === "th" ? "คุณ" : lang === "zh" ? "你" : "You"}
+                </span>
+              ) : (
+                p
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="online-empty">
+          {lang === "th"
+            ? "ไม่มีผู้เล่นออนไลน์"
+            : lang === "zh"
+            ? "暂无在线玩家"
+            : "No players online"}
+        </p>
+      )}
+    </div>
 
-            {/* DIGITS */}
-            <div className="digits-grid">
-              {digits.map((n) => {
-                const used = expression.includes(String(n));
-                return (
-                  <button
-                    key={n}
-                    disabled={lastWasNumber}
-                    className={`digit-btn ${used ? "used" : ""}`}
-                    onClick={() => {
-                      playSound("click");
-                      if (!used && !lastWasNumber) {
-                        setExpression((p) => p + n);
-                        setLastWasNumber(true);
-                        setLastWasSqrt(false);
-                      }
-                    }}
-                  >
-                    {n}
-                  </button>
-                );
-              })}
-            </div>
+    <h1 className="select-mode-title">{T.selectMode}</h1>
 
-            {/* OPERATORS */}
-            <div className="ops-grid">
-              {operators.map((op) => (
-                <button
-                  key={op}
-                  disabled={
-                    disabledOps.includes(op) ||
-                    (op === "√" && (lastWasSqrt || lastWasNumber))
-                  }
-                  className={`op-btn ${
-                    disabledOps.includes(op) ? "disabled" : ""
-                  }`}
-                  onClick={() => {
-                    if (!disabledOps.includes(op)) {
-                      playSound("click");
-                      setExpression((p) => p + op);
-                      setLastWasNumber(op === ")" ? true : false);
-                      setLastWasSqrt(op === "√");
-                    }
-                  }}
-                >
-                  {op}
-                </button>
-              ))}
-            </div>
+    <div className="mode-buttons">
+      <button
+        className="mode-btn glass-btn"
+        onClick={() => {
+          playSound("click");
+          setMode("easy");
+          socket.emit("joinGame", { nickname, mode: "easy" });
+          setPage("waiting");
+        }}
+      >
+        {T.easy}
+      </button>
 
-            {/* EXPRESSION BOX */}
-            <input
-              className="expression-box"
-              readOnly
-              value={expression}
-              placeholder={T.buildEq}
-            />
+      <button
+        className="mode-btn glass-btn"
+        onClick={() => {
+          playSound("click");
+          setMode("hard");
+          socket.emit("joinGame", { nickname, mode: "hard" });
+          setPage("waiting");
+        }}
+      >
+        {T.hard}
+      </button>
+    </div>
+  </motion.div>
+)}
 
-            {/* ACTION BUTTONS */}
-            <div className="action-row">
-              <button
-                className="equal-btn glass-btn"
-                onClick={() => {
-                  playSound("click");
-                  setExpression((p) => p.slice(0, -1));
-                  setLastWasNumber(false);
-                  setLastWasSqrt(false);
-                }}
-              >
-                {T.delete}
-              </button>
-              <button
-                className="equal-btn glass-btn"
-                onClick={() => {
-                  playSound("click");
-                  checkAnswer();
-                }}
-                disabled={digits.some(
-                  (d) => !expression.includes(String(d))
-                )}
-              >
-                {T.submit}
-              </button>
-            </div>
+{/* WAITING ROOM PAGE ------------------------------------------------ */}
+{page === "waiting" && (
+  <motion.div key="waiting" className="waiting-page" {...fade}>
+    <h1 className="waiting-title">
+      {waitingPlayers.length > 1
+        ? lang === "th"
+          ? "พร้อมเริ่มเกม!"
+          : lang === "zh"
+          ? "准备开始游戏！"
+          : "Ready to Start!"
+        : lang === "th"
+        ? "⏳ รอผู้เล่น..."
+        : lang === "zh"
+        ? "⏳ 等待玩家..."
+        : "⏳ Waiting for players..."}
+    </h1>
 
-            {/* POPUP ------------------------------------------------ */}
-            {resultPopup && (
-              <motion.div
-                className={`popup ${
-                  resultPopup === "invalid" ? "invalid" : ""
-                }`}
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ type: "spring", stiffness: 120 }}
-              >
-                {resultPopup === "correct" && <h2>{T.correct}</h2>}
-                {resultPopup === "wrong" && <h2>{T.wrong}</h2>}
-                {resultPopup === "timeout" && (
-                  <>
-                    <h2>{T.timeout}</h2>
-                    <p className="solution-text">
-                      💡 {T.correctAnswer || "Possible Solution"}: <br />
-                      <span className="solution-highlight">{solutionExpr}</span>
-                    </p>
-                  </>
-                )}
+    <h2>
+      {lang === "th" ? "โหมด" : lang === "zh" ? "模式" : "Mode"}:{" "}
+      <span className="highlight">
+        {mode === "easy" ? T.easy : T.hard}
+      </span>
+    </h2>
 
-                {resultPopup === "invalid" && <h2>{T.invalidExpr}</h2>}
+    <div className="waiting-box glass-card">
+      {waitingPlayers.length > 0 ? (
+        <ul>
+          {waitingPlayers.map((p, i) => (
+            <li key={i}>{p}</li>
+          ))}
+        </ul>
+      ) : (
+        <p>
+          {lang === "th"
+            ? "ยังไม่มีผู้เล่นในห้องนี้"
+            : lang === "zh"
+            ? "该房间暂无玩家"
+            : "No players yet"}
+        </p>
+      )}
+    </div>
 
-                <div className="popup-btns">
-                  <button
-                    onClick={() => {
-                      playSound("click");
-                      startGame(mode);
-                    }}
-                  >
-                    <FaRedo /> {T.playAgain}
-                  </button>
-                  <button
-                    onClick={() => {
-                      playSound("click");
-                      stopTimer();
-                      setPage("stats");
-                    }}
-                  >
-                    <FaSignOutAlt /> {T.exit}
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </motion.div>
-        )}
+    {waitingPlayers.length > 1 && (
+
+      <button
+  className="main-btn"
+  onClick={() => {
+    const gameData = generateProblem(mode); // ✅ ดึงข้อมูลที่สร้างจริง ๆ
+    console.log("📤 Sending gameData to server:", gameData);
+    socket.emit("startGame", { mode, nickname, gameData });
+  }}
+>
+  🚀 {lang === "th" ? "เริ่มเกม" : lang === "zh" ? "开始游戏" : "Start Game"}
+</button>
+
+
+
+    )}
+
+<button
+  className="secondary-btn"
+  onClick={() => {
+    playSound("click");
+    socket.emit("leaveGame", { nickname, mode }); // ออกจากห้อง แต่ยัง online
+    setPage("mode"); // กลับไปหน้าเลือกโหมด
+  }}
+>
+  ← {lang === "th" ? "ออกจากห้อง" : lang === "zh" ? "离开房间" : "Leave Room"}
+</button>
+
+  </motion.div>
+)}
+{/* PRE-GAME POPUP ------------------------------------------------ */}
+{preGameInfo && countdown > 0 && (
+  <motion.div
+    key="preGame"
+    className="popup countdown-popup"
+    initial={{ opacity: 0, scale: 0.8 }}
+    animate={{ opacity: 1, scale: 1 }}
+    transition={{ type: "spring", stiffness: 120 }}
+  >
+    <h2>
+      {lang === "th"
+        ? `${preGameInfo.starter} เริ่มเกม!`
+        : lang === "zh"
+        ? `${preGameInfo.starter} 开始了游戏！`
+        : `${preGameInfo.starter} started the game!`}
+    </h2>
+    <h1 className="countdown-number">{countdown}</h1>
+  </motion.div>
+)}
+
+
+{/* GAME PAGE ------------------------------------------------ */}
+{page === "game" && (
+  <motion.div key="game" className="game-page" {...fade}>
+    {/* HEADER */}{/* GAME HEADER */}
+<div className="game-header">
+  {/* 🧑‍💼 แสดงเฉพาะชื่อเรา */}
+  <h2 className="big-player">
+    {T.playerName}: <span>{nickname}</span>
+  </h2>
+
+  {/* 🎯 สถานะการเล่น */}
+  {isMyTurn ? (
+    <>
+      <h3 className="turn-status">🎯 It's your turn!</h3>
+
+      {/* สถิติ gameplay */}
+      <div className="game-stats">
+        <p className="round-display">
+          Round: <span className="highlight">{rounds + 1}</span>
+        </p>
+        <h1 className="target-title">
+          {T.target}: <span className="highlight">{target}</span>
+        </h1>
+        <p
+          className={timeLeft <= 10 ? "time-score time-low" : "time-score"}
+        >
+          {T.timeLeft}: {timeLeft}s
+        </p>
+        <p>
+          {T.score}: {score}
+        </p>
+      </div>
+    </>
+  ) : (
+    // 🔹 ถ้าไม่ใช่ตาเรา → แสดงเฉพาะ waiting message
+    <div className="waiting-header">
+      <h3 className="turn-status">
+        ⏳ Waiting for{" "}
+        <span className="highlight">{gameState?.currentTurn}</span>...
+      </h3>
+      <h1
+        className={`waiting-time ${
+          timeLeft <= 10 ? "time-critical" : ""
+        }`}
+      >
+        {timeLeft > 0 ? `${timeLeft}s` : "00s"}
+      </h1>
+    </div>
+  )}
+</div>
+
+
+    {/* 🎮 GAME BODY */}
+{!isMyTurn ? (
+  // ---------------- WAITING TURN ----------------
+  <div className="waiting-turn glass-card">
+    <h2 className="waiting-title">
+      ⏳ Waiting for{" "}
+      <span className="highlight">{gameState?.currentTurn}</span>...
+    </h2>
+
+    {/* เวลาใหญ่ตรงกลาง */}
+    <div className="waiting-timer">
+      <h1
+        className={`time-left ${
+          timeLeft <= 10 ? "time-critical" : ""
+        }`}
+      >
+        {timeLeft > 0 ? `${timeLeft}s` : "00s"}
+      </h1>
+    </div>
+
+    <p className="hint-text">
+      Please wait until it's your turn to play.
+    </p>
+  </div>
+) : (
+  // ---------------- ACTIVE TURN ----------------
+  <>
+    {/* DIGITS */}
+    <div className="digits-grid">
+      {digits.map((n) => {
+        const used = expression.includes(String(n));
+        return (
+          <button
+            key={n}
+            disabled={lastWasNumber || used}
+            className={`digit-btn ${used ? "used" : ""}`}
+            onClick={() => {
+              playSound("click");
+              if (!used && !lastWasNumber) {
+                setExpression((p) => p + n);
+                setLastWasNumber(true);
+              }
+            }}
+          >
+            {n}
+          </button>
+        );
+      })}
+    </div>
+
+    {/* OPERATORS */}
+    <div className="ops-grid">
+      {operators.map((op) => (
+        <button
+          key={op}
+          disabled={disabledOps.includes(op) || !lastWasNumber}
+          className={`op-btn ${
+            disabledOps.includes(op) ? "disabled" : ""
+          }`}
+          onClick={() => {
+            if (!disabledOps.includes(op) && lastWasNumber) {
+              playSound("click");
+              setExpression((p) => p + op);
+              setLastWasNumber(false);
+            }
+          }}
+        >
+          {op}
+        </button>
+      ))}
+    </div>
+
+    {/* EXPRESSION BOX */}
+    <input
+      className="expression-box"
+      readOnly
+      value={expression}
+      placeholder={T.buildEq}
+    />
+
+    {/* ACTION BUTTONS */}
+    <div className="action-row">
+      <button
+        className="equal-btn glass-btn"
+        onClick={() => {
+          playSound("click");
+          setExpression((p) => p.slice(0, -1));
+          setLastWasNumber(false);
+          setLastWasSqrt(false);
+        }}
+      >
+        {T.delete}
+      </button>
+      <button
+        className="equal-btn glass-btn"
+        onClick={() => {
+          playSound("click");
+          checkAnswer();
+        }}
+        disabled={digits.some((d) => !expression.includes(String(d)))}
+      >
+        {T.submit}
+      </button>
+    </div>
+  </>
+)}
+
+{/* 🧩 POPUP SYSTEM ------------------------------------------------ */}
+{resultPopup && resultPopup !== "endRound" && (
+  <motion.div
+    className={`popup ${resultPopup === "invalid" ? "invalid" : ""}`}
+    initial={{ scale: 0 }}
+    animate={{ scale: 1 }}
+    transition={{ type: "spring", stiffness: 120 }}
+  >
+    {/* ✅ ถูก */}
+    {resultPopup === "correct" && <h2>{T.correct}</h2>}
+
+    {/* ❌ ผิด */}
+    {resultPopup === "wrong" && <h2>{T.wrong}</h2>}
+
+    {/* ⏰ หมดเวลา */}
+    {resultPopup === "timeout" && (
+      <>
+        <h2>{T.timeout}</h2>
+        <p className="solution-text">
+          💡 {T.correctAnswer || "Possible Solution"}: <br />
+          <span className="solution-highlight">{solutionExpr}</span>
+        </p>
+      </>
+    )}
+
+    {/* 🚫 invalid */}
+    {resultPopup === "invalid" && <h2>{T.invalidExpr}</h2>}
+
+    {/* 💀 Game Over */}
+    {resultPopup === "gameover" && (
+      <>
+        <h2>💀 Game Over</h2>
+        <p className="solution-text">Not enough players to continue.</p>
+      </>
+    )}
+
+    {/* 🕒 นับถอยหลังอยู่ใน popup เดิมเลย */}
+    {autoResumeCount !== null && (
+  <p className="resume-count">
+    Resuming next turn in <span className="highlight">{autoResumeCount}</span>s...
+  </p>
+)}
+
+
+    {/* ปุ่มจะไม่โชว์ระหว่าง auto resume */}
+    {autoResumeCount === null && (
+      <div className="popup-btns">
+        <button
+          onClick={() => {
+            playSound("click");
+            startGame(mode);
+          }}
+        >
+          <FaRedo /> {T.playAgain}
+        </button>
+        <button
+          onClick={() => {
+            playSound("click");
+            stopTimer();
+            setPage("stats");
+          }}
+        >
+          <FaSignOutAlt /> {T.exit}
+        </button>
+      </div>
+    )}
+  </motion.div>
+)}
+
+  </motion.div>
+)}
+
+{resultPopup === "endRound" && (
+  <motion.div
+    className="popup"
+    initial={{ scale: 0 }}
+    animate={{ scale: 1 }}
+    transition={{ type: "spring", stiffness: 120 }}
+  >
+    <h2>🏁 End of Round {rounds}</h2>
+    <p className="solution-text">
+      {lang === "th"
+        ? "รอบนี้จบแล้ว! พร้อมเริ่มรอบถัดไปหรือไม่?"
+        : "Round complete! Ready for the next one?"}
+    </p>
+    <div className="popup-btns">
+      <button
+        onClick={() => {
+          playSound("click");
+          socket.emit("resumeGame", { mode });
+          setResultPopup(null);
+        }}
+      >
+        <FaRedo /> {T.playAgain}
+      </button>
+      <button
+        onClick={() => {
+          playSound("click");
+          socket.emit("playerLeftGame", { nickname, mode });
+          setPage("login");
+        }}
+      >
+        <FaSignOutAlt /> {T.exit}
+      </button>
+    </div>
+  </motion.div>
+)}
 
         {/* STATS PAGE ---------------------------------------------- */}
         {page === "stats" && (
@@ -811,6 +1395,9 @@ const createExpressionWithResult = (numbers, ops, mode, disabledOps = []) => {
           </motion.div>
         )}
       </AnimatePresence>
+
+
+
     </motion.div>
   );
 }
