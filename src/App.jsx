@@ -1,3 +1,14 @@
+/* =============================================================
+ 🧩 IQ180 React App (Production-ready Clean Code)
+---------------------------------------------------------------
+ This file includes all logic for:
+ - Game state and timer system
+ - Multiplayer socket events
+ - Sound and UI management
+ - Comprehensive comments for each major section (English)
+=============================================================*/
+
+
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Howl } from "howler";
@@ -19,7 +30,13 @@ import timeoutSoundFile from "./sounds/timeout.mp3";
 import bgmFile from "./sounds/bgm.mp3";
 
 import { io } from "socket.io-client";
-const socket = io("http://localhost:4000");
+const socket = io("http://192.168.1.178:4000");
+//ถ้าเปลี่ยน router แม้ใช้ wifi ชื่อเดียวกัน ก็ต้องใส่ ip ใหม่
+// เข้า Terminal เครื่อง แล้วพิมพ์:
+// "ipconfig" (Window)
+// "ifconfig | grep inet" (Mac)
+// แล้วหา 	inet 10.201.213.149 netmask 0xffff8000 
+
 
 export default function App() {
   /* 🌍 MULTI-LANGUAGE */
@@ -219,118 +236,6 @@ const [isMyTurn, setIsMyTurn] = useState(false); // ตอนนี้เป็�
 const [autoResumeCount, setAutoResumeCount] = useState(null);
 
 
-
-/* 🎲 GAME GENERATOR (FINAL FIXED VERSION) */
-const generateProblem = (mode) => {
-  const nums = Array.from({ length: 9 }, (_, i) => i + 1);
-  const selected = [];
-  while (selected.length < 5) {
-    const idx = Math.floor(Math.random() * nums.length);
-    selected.push(nums.splice(idx, 1)[0]);
-  }
-
-  const baseOps = ["+", "-", "×", "÷"];
-  const dis = [];
-
-  // ❌ สุ่มเครื่องหมายต้องห้าม 2 ตัว (เฉพาะจาก 4 ตัวหลัก)
-  if (mode === "hard") {
-    while (dis.length < 2) {
-      const op = baseOps[Math.floor(Math.random() * baseOps.length)];
-      if (!dis.includes(op)) dis.push(op);
-    }
-  }
-
-  // ✅ แสดงทุกปุ่ม แต่บางอันห้ามใช้ (เทา)
-  const allOps =
-    mode === "hard"
-      ? baseOps.concat(["√", "(", ")"])
-      : baseOps;
-
-  setOperators(allOps);
-  setDisabledOps(dis);
-
-  // ✅ ส่ง disabledOps เข้าไปเพื่อไม่ให้ใช้ในเฉลย
-  const { expr, result } = createExpressionWithResult(selected, allOps, mode, dis);
-
-  setDigits(selected);
-  setTarget(result);
-  setSolutionExpr(expr);
-
-  return { digits: selected, operators: allOps, target: result, mode, disabledOps: dis };
-};
-
-/* 🧮 CREATE EXPRESSION AND CALCULATE TARGET (SAFE & INTEGER ONLY) */
-const createExpressionWithResult = (numbers, ops, mode, disabledOps = []) => {
-  const shuffle = (arr) => arr.sort(() => Math.random() - 0.5);
-  const nums = shuffle([...numbers]);
-
-  // สุ่มเครื่องหมายโดยห้ามใช้ disabled
-  const allowedOps = ops.filter((op) => !disabledOps.includes(op));
-
-  let expr = "";
-  let attempts = 0;
-  let result = 0;
-
-  // 🔁 พยายามสุ่มจนกว่าจะได้จำนวนเต็ม
-  while ((!Number.isInteger(result) || result <= 0) && attempts < 300) {
-    attempts++;
-    expr = "";
-
-    for (let i = 0; i < nums.length; i++) {
-      let n = nums[i];
-
-      // 💡 มีโอกาสใส่ root หน้าเลขใน hard mode
-      if (mode === "hard" && allowedOps.includes("√") && Math.random() < 0.3) {
-        n = `√${n}`;
-      }
-
-      expr += n;
-
-      if (i < nums.length - 1) {
-        // ✅ ใช้เฉพาะเครื่องหมายที่อนุญาตเท่านั้น
-        const op = allowedOps[Math.floor(Math.random() * allowedOps.length)];
-        expr += op;
-      }
-
-      // 💫 โอกาสใส่วงเล็บแบบสุ่ม (แต่ไม่พัง syntax)
-      if (mode === "hard" && Math.random() < 0.15 && !expr.includes("(")) expr = `(${expr}`;
-      if (mode === "hard" && Math.random() < 0.15 && expr.includes("(") && !expr.endsWith(")"))
-        expr += ")";
-    }
-
-    try {
-      const cleanExpr = expr
-        .replace(/×/g, "*")
-        .replace(/÷/g, "/")
-        .replace(/√(\d+)/g, "Math.sqrt($1)");
-
-      result = eval(cleanExpr);
-    } catch {
-      result = 0;
-    }
-  }
-
-  // ถ้าไม่เจอจำนวนเต็มเลยภายใน 300 รอบ ให้ reset ใหม่ (กัน infinite loop)
-  if (!Number.isInteger(result) || result <= 0) {
-    return createExpressionWithResult(numbers, ops, mode, disabledOps);
-  }
-
-  return { expr, result };
-};
-
-
-  const startGame = (m) => {
-    setMode(m);
-    generateProblem(m);
-    setExpression("");
-    setLastWasNumber(false);
-    setLastWasSqrt(false);
-    setTimeLeft(m === "hard" ? 30 : 60);
-    setRunning(true);
-    setResultPopup(null);
-    setSolution(null);
-    setPage("game");
-  };
 /* 🕒 TIMER (Client-side synced with Player 1, global for all players) */
 const [baseTime, setBaseTime] = useState(null);
 const [timeLeft, setTimeLeft] = useState(60);
@@ -342,18 +247,31 @@ socket.on("yourTurn", ({ mode }) => {
   console.log("🎯 It's your turn!");
   setIsMyTurn(true);
 
-  // ถ้าเราเป็น Player 1 → ส่งเวลาเริ่มให้ทุกคน
-  if (gameState?.turnOrder?.[0] === nickname) {
-    const startTime = Date.now();
-    socket.emit("syncTimer", { mode, startTime });
-    console.log("🕒 Host started global timer:", new Date(startTime).toLocaleTimeString());
+  // 🧩 ตรวจว่าตานี้เป็นตาแรกหรือไม่ (ยังไม่มี rounds)
+  if (rounds === 0 && digits.length > 0) {
+    console.log("🧩 First turn — using server-provided problem");
+  } else {
+    // ตาอื่นให้สร้างโจทย์ใหม่
+    const gameData = generateProblem(mode);
+    setDigits(gameData.digits);
+    setOperators(gameData.operators);
+    setDisabledOps(gameData.disabledOps);
+    setTarget(gameData.target);
+    setMode(gameData.mode);
   }
 
-  // ตั้งเวลาเริ่มในเครื่องเราเอง
+  // ตั้ง base time และเริ่ม timer (เฉพาะตอนที่ได้รับ sync แล้ว)
   const now = Date.now();
   setBaseTime(now);
   setTimeLeft(60);
   setRunning(true);
+
+  // ถ้าเราเป็น host → เริ่ม timer sync
+  if (gameState?.turnOrder?.[0] === nickname && rounds > 0) {
+    const startTime = Date.now();
+    socket.emit("syncTimer", { mode, startTime });
+    console.log("🕒 Host started global timer:", new Date(startTime).toLocaleTimeString());
+  }
 });
 
 /* 🕛 รับเวลาจาก host เพื่อ sync (ทุกคนรวมถึงคนรอ) */
@@ -371,14 +289,22 @@ socket.on("syncTimer", ({ mode, startTime }) => {
 
 /* 🔁 เมื่อสลับเทิร์น ให้หยุด timer ชั่วคราว */
 socket.on("turnSwitch", (data) => {
-  console.log("🔁 Turn switched to:", data.nextTurn);
+  console.log("🔁 Turn switched:", data);
   setGameState((prev) => ({
     ...prev,
     currentTurn: data.nextTurn,
   }));
+
+  // ✅ อัปเดตรอบจาก server
+  if (data.round !== undefined) {
+    setRounds(data.round);
+    console.log(`📦 Updated Round from server: ${data.round}`);
+  }
+
   setIsMyTurn(data.nextTurn === nickname);
   setRunning(false);
 });
+
 
 /* 🕒 จับเวลาแบบ global ทุก client (รวมถึงคนรอ) */
 useEffect(() => {
@@ -665,16 +591,46 @@ useEffect(() => {
     console.log("🎯 Current turn:", data.currentTurn);
   });
   
+  // 📦 รับโจทย์ใหม่จาก server
+  socket.on("newRound", (data) => {
+    console.log("🧩 Received new round problem:", data);
+
+    setDigits(data.digits);
+    setOperators(data.operators);
+    setDisabledOps(data.disabledOps);
+    setTarget(data.target);
+    setRounds(data.round);
+    setExpression("");
+    setLastWasNumber(false);
+    setResultPopup(null);
+  });
+
   
   // 🔁 สลับเทิร์นผู้เล่น
   socket.on("turnSwitch", (data) => {
     console.log("🔁 Turn switched:", data);
+
     setGameState((prev) => ({
       ...prev,
       currentTurn: data.nextTurn,
-      currentTurnIndex: data.currentTurnIndex,
     }));
+  
+    // ✅ ใช้ค่า round จาก server โดยตรง
+    if (data.round !== undefined) {
+      setRounds(data.round);
+      console.log(`📦 Synced round from server: ${data.round}`);
+    }
+  
     setIsMyTurn(data.nextTurn === nickname);
+    setRunning(false);
+  });
+  
+  /* 💀 เมื่อเกมผู้เล่นเหลือน้อยเกินไป */
+  socket.on("gameover", (data) => {
+    console.log("💀 Game over:", data);
+    setResultPopup("gameover");
+    stopTimer();
+    setRunning(false);
   });
 
   // 🎯 เมื่อถึงตาเราเล่น (server ส่งสัญญาณ yourTurn)
@@ -737,6 +693,7 @@ useEffect(() => {
       setWaitingPlayers((prev) => prev.filter((p) => p !== data.nickname));
     }
   });
+
 
   // 🧹 cleanup (สำคัญมาก ป้องกัน event ซ้ำ)
   return () => {
@@ -865,8 +822,8 @@ useEffect(() => {
           )}
         </div>
       </div>
-
-{/* 🔙 Smart Global Back Button */}
+      
+{/* 🔙 Back Button */}
 {page !== "login" && (
   <button
     className="back-btn"
@@ -874,19 +831,26 @@ useEffect(() => {
       playSound("click");
 
       if (page === "game") {
-        // ⏹ ถ้าอยู่หน้าเกม — หยุดจับเวลาและกลับไปเลือกโหมด
         stopTimer();
-        socket.emit("leaveGame", { nickname, mode });
-        setPage("mode");
+
+        // ✅ ใช้ mode จาก gameState ถ้ามี (กัน state ค้าง)
+        const activeMode = gameState?.mode || mode;
+
+        socket.emit("playerLeftGame", {
+          nickname,
+          mode: activeMode,
+        });
+
+        setRunning(false);
+        setIsMyTurn(false);
+        setPage("mode"); // กลับไปหน้าเลือกโหมด
       } 
-      else if (page === "mode" || page === "waiting") {
-        // ❌ ถ้าอยู่หน้าเลือกโหมด หรือรอคน — ออกจากระบบจริง
+      else if (page === "waiting" || page === "mode") {
         socket.emit("leaveLobby", nickname);
         socket.disconnect();
         setPage("login");
       } 
       else {
-        // fallback safety
         setPage("login");
       }
     }}
@@ -894,6 +858,7 @@ useEffect(() => {
     <FaArrowLeft />
   </button>
 )}
+
 
       {/* ⚡ PAGE SWITCHER */}
       <AnimatePresence mode="wait">
@@ -1038,14 +1003,13 @@ useEffect(() => {
 
     {waitingPlayers.length > 1 && (
 
-      <button
-  className="main-btn"
-  onClick={() => {
-    const gameData = generateProblem(mode); // ✅ ดึงข้อมูลที่สร้างจริง ๆ
-    console.log("📤 Sending gameData to server:", gameData);
-    socket.emit("startGame", { mode, nickname, gameData });
-  }}
->
+  <button
+    className="main-btn"
+    onClick={() => {
+      socket.emit("startGame", { mode, nickname });
+    }}
+  >
+
   🚀 {lang === "th" ? "เริ่มเกม" : lang === "zh" ? "开始游戏" : "Start Game"}
 </button>
 
@@ -1090,7 +1054,9 @@ useEffect(() => {
 {/* GAME PAGE ------------------------------------------------ */}
 {page === "game" && (
   <motion.div key="game" className="game-page" {...fade}>
-    {/* HEADER */}{/* GAME HEADER */}
+    {/* HEADER */}
+    
+    {/* GAME HEADER */}
 <div className="game-header">
   {/* 🧑‍💼 แสดงเฉพาะชื่อเรา */}
   <h2 className="big-player">
@@ -1105,7 +1071,7 @@ useEffect(() => {
       {/* สถิติ gameplay */}
       <div className="game-stats">
         <p className="round-display">
-          Round: <span className="highlight">{rounds + 1}</span>
+          Round: <span className="highlight">{rounds}</span>
         </p>
         <h1 className="target-title">
           {T.target}: <span className="highlight">{target}</span>

@@ -3,22 +3,85 @@ import http from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 
+/* 🚀 INITIAL SETUP -------------------------------------------------- */
 const app = express();
 app.use(cors());
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-/* 🌍 GLOBAL STATE */
+/* 🌍 GLOBAL STATE ---------------------------------------------------- */
 let players = {}; // { socket.id: { nickname, mode, isOnline } }
 let waitingRooms = { easy: [], hard: [] };
 let gameRooms = {}; // { mode: { players, turnOrder, currentTurnIndex, currentTurn, rounds } }
 
-/* ⚙️ SOCKET EVENTS */
+/* ⚙️ SOCKET EVENTS --------------------------------------------------- */
+
+/* 🎲 SERVER PROBLEM GENERATOR -------------------------------------- */
+function createExpressionWithResult(numbers, ops, mode, disabledOps = []) {
+  const shuffle = (arr) => arr.sort(() => Math.random() - 0.5);
+  const nums = shuffle([...numbers]);
+  const allowedOps = ops.filter((op) => !disabledOps.includes(op));
+  let expr = "", attempts = 0, result = 0;
+
+  while ((!Number.isInteger(result) || result <= 0) && attempts < 300) {
+    attempts++;
+    expr = "";
+    for (let i = 0; i < nums.length; i++) {
+      let n = nums[i];
+      if (mode === "hard" && allowedOps.includes("√") && Math.random() < 0.3)
+        n = `√${n}`;
+      expr += n;
+      if (i < nums.length - 1)
+        expr += allowedOps[Math.floor(Math.random() * allowedOps.length)];
+    }
+    try {
+      const clean = expr
+        .replace(/×/g, "*")
+        .replace(/÷/g, "/")
+        .replace(/√(\d+)/g, "Math.sqrt($1)");
+      result = eval(clean);
+    } catch {
+      result = 0;
+    }
+  }
+  return { expr, result };
+}
+
+function generateProblem(mode) {
+  const nums = Array.from({ length: 9 }, (_, i) => i + 1);
+  const selected = [];
+  while (selected.length < 5) {
+    const idx = Math.floor(Math.random() * nums.length);
+    selected.push(nums.splice(idx, 1)[0]);
+  }
+
+  const baseOps = ["+", "-", "×", "÷"];
+  const dis = [];
+  if (mode === "hard") {
+    while (dis.length < 2) {
+      const op = baseOps[Math.floor(Math.random() * baseOps.length)];
+      if (!dis.includes(op)) dis.push(op);
+    }
+  }
+
+  const allOps = mode === "hard" ? baseOps.concat(["√", "(", ")"]) : baseOps;
+  const { expr, result } = createExpressionWithResult(selected, allOps, mode, dis);
+  return {
+    digits: selected,
+    operators: allOps,
+    disabledOps: dis,
+    target: result,
+    expr,
+    mode,
+  };
+}
+
+
 io.on("connection", (socket) => {
   console.log("🟢 Player connected:", socket.id);
 
-  /* ✅ ตั้งชื่อ */
+  /* ✅ ตั้งชื่อผู้เล่น */
   socket.on("setNickname", (nickname) => {
     if (!nickname) return;
     players[socket.id] = { nickname, mode: null, isOnline: true };
@@ -26,11 +89,11 @@ io.on("connection", (socket) => {
     updatePlayerList();
   });
 
-  /* ✅ เข้าห้อง */
+  /* ✅ เข้าห้องรอเกม */
   socket.on("joinGame", ({ nickname, mode }) => {
     if (!nickname || !mode) return;
 
-    // เอาออกจากห้องเก่าถ้ามี
+    // ลบจากห้องเก่าก่อนถ้ามี
     const old = players[socket.id];
     if (old?.mode) {
       waitingRooms[old.mode] = waitingRooms[old.mode].filter(
@@ -38,67 +101,46 @@ io.on("connection", (socket) => {
       );
     }
 
+    // เข้าห้องใหม่
     players[socket.id] = { nickname, mode, isOnline: true };
     socket.join(mode);
 
-    if (!waitingRooms[mode].includes(nickname))
+    if (!waitingRooms[mode].includes(nickname)) {
       waitingRooms[mode].push(nickname);
+    }
 
     console.log(`👤 ${nickname} joined ${mode}`);
     io.to(mode).emit("waitingList", { mode, players: waitingRooms[mode] });
     updatePlayerList();
 
+    // ถ้ามีครบ 2 คนขึ้นไป → ให้ host เริ่มได้
     if (waitingRooms[mode].length >= 2) {
       io.to(mode).emit("canStart", { mode, canStart: true });
     }
   });
 
   /* 🚀 เริ่มเกม */
-  socket.on("startGame", ({ mode, nickname, gameData }) => {
-    if (!mode || !nickname || !gameData) return;
+  socket.on("startGame", ({ mode, nickname }) => {
+    if (!mode || !nickname) return;
     const activePlayers = [...waitingRooms[mode]];
     if (activePlayers.length < 2) return;
 
     console.log(`🚀 ${nickname} started ${mode} game with:`, activePlayers);
 
-    // 🔀 สุ่มลำดับการเล่น (ครั้งเดียว)
     const shuffled = [...activePlayers].sort(() => Math.random() - 0.5);
-    const ROUND_TIME = 30; // หรือ 60 แล้วแต่โหมด
-    let gameTimers = {}; // { mode: { timer, timeLeft } }
-    
-    function startTurnTimer(mode) {
-      if (!gameRooms[mode]) return;
-    
-      clearInterval(gameTimers[mode]?.timer);
-      gameTimers[mode] = { timeLeft: ROUND_TIME };
-    
-      gameTimers[mode].timer = setInterval(() => {
-        gameTimers[mode].timeLeft -= 1;
-    
-        io.to(mode).emit("timeUpdate", {
-          mode,
-          timeLeft: gameTimers[mode].timeLeft,
-        });
-    
-        if (gameTimers[mode].timeLeft <= 0) {
-          clearInterval(gameTimers[mode].timer);
-          io.to(mode).emit("timeout", { mode });
-          // สลับคนเล่นอัตโนมัติเมื่อหมดเวลา
-          io.to(mode).emit("resumeGame", { mode });
-        }
-      }, 1000);
-    }
-    
-    // 🏠 สร้างห้องเกมใหม่
+    const ROUND_TIME = 30;
+    let gameTimers = {};
+
     gameRooms[mode] = {
       players: activePlayers,
       turnOrder: shuffled,
       currentTurnIndex: 0,
       currentTurn: shuffled[0],
       rounds: 1,
+      currentProblem: generateProblem(mode), // ✅ สร้างโจทย์แรก
+      answers: [], // ✅ เก็บคำตอบและเวลาในแต่ละรอบ
     };
 
-    // ⏳ แจ้ง preGame ให้ทุกคนเห็น countdown
     io.to(mode).emit("preGameStart", {
       mode,
       players: activePlayers,
@@ -106,50 +148,85 @@ io.on("connection", (socket) => {
       countdown: 3,
     });
 
-    // ⏰ เริ่มเกมจริงหลัง countdown
     setTimeout(() => {
       io.to(mode).emit("gameStart", {
-        ...gameData,
+        ...gameRooms[mode].currentProblem, // ✅ ใช้โจทย์จาก server
         players: activePlayers,
         startedBy: nickname,
         currentTurn: shuffled[0],
         message: `🎮 Game started by ${nickname} (${shuffled.join(", ")})`,
+        round: 1,
       });
 
-      // ส่ง event "yourTurn" ให้คนเริ่ม
-      const firstSocket = findSocketByNickname(shuffled[0]);
-      if (firstSocket) io.to(firstSocket).emit("yourTurn", { mode });
-      startTurnTimer(mode);
+      setTimeout(() => {
+        const firstSocket = findSocketByNickname(shuffled[0]);
+        const startTime = Date.now();
+        io.to(mode).emit("syncTimer", { mode, startTime });
+        if (firstSocket) io.to(firstSocket).emit("yourTurn", { mode });
+        console.log(`🕒 Timer started at ${new Date(startTime).toLocaleTimeString()}`);
+      }, 500);
 
       waitingRooms[mode] = [];
     }, 3000);
   });
 
-/* 🔁 สลับเทิร์น (resume game หรือ auto-next) */
-socket.on("resumeGame", ({ mode }) => {
-  const room = gameRooms[mode];
-  if (!room) return;
 
-  // หมุน index ไปคนถัดไป
-  room.currentTurnIndex = (room.currentTurnIndex + 1) % room.turnOrder.length;
-  const nextTurn = room.turnOrder[room.currentTurnIndex];
-  room.currentTurn = nextTurn;
+  // 💾 เก็บสถานะ lock แยกต่อ mode
+  const roundLock = { easy: false, hard: false };
 
-  console.log(`🔁 Switching turn to ${nextTurn} (Round ${room.rounds || 1})`);
+  /* 🔁 สลับเทิร์น (resume game หรือ auto-next) */
+  socket.on("resumeGame", ({ mode }) => {
+    const room = gameRooms[mode];
+    if (!room) return;
 
-  // แจ้งทุก client ว่าเทิร์นเปลี่ยนแล้ว
-  io.to(mode).emit("turnSwitch", {
-    nextTurn,
-    currentTurnIndex: room.currentTurnIndex,
-    round: room.rounds || 1,
-  });
+    // ✅ ป้องกัน resume ซ้ำ
+    if (roundLock[mode]) {
+      console.log(`⚠️ [LOCKED] Resume for ${mode} ignored (still processing round ${room.rounds})`);
+      return;
+    }
+    roundLock[mode] = true;
 
-  // หา socket ของคนที่จะเล่นคนต่อไป
-  const nextSocket = findSocketByNickname(nextTurn);
-  if (nextSocket) {
-    io.to(nextSocket).emit("yourTurn", { mode });
+    // ถ้าผู้เล่นไม่พอ → จบเกม
+    if (!room.players || room.players.length < 2) {
+      console.log(`💀 Game in ${mode} ended — not enough players`);
+      io.to(mode).emit("gameover", { reason: "not_enough_players" });
+      delete gameRooms[mode];
+      roundLock[mode] = false;
+      return;
+    }
 
-    // 🕒 ให้ host (หรือ player 1) sync timer ใหม่ให้ทุกคน
+    // ✅ เพิ่มตัวนับเทิร์น
+    if (room.turnCount === undefined) room.turnCount = 0;
+    room.turnCount += 1;
+
+    // ✅ ครบรอบ → เพิ่มรอบใหม่
+    if (room.turnCount >= room.turnOrder.length) {
+      room.rounds += 1;
+      room.turnCount = 0;
+      console.log(`🏁 End of round ${room.rounds - 1} → starting round ${room.rounds}`);
+
+      // 🧩 สร้างโจทย์ใหม่จาก server
+      room.currentProblem = generateProblem(mode);
+      io.to(mode).emit("newRound", {
+        round: room.rounds,
+        ...room.currentProblem,
+      });
+    }
+
+    // 🔄 เปลี่ยนตาเล่น
+    room.currentTurnIndex = (room.currentTurnIndex + 1) % room.turnOrder.length;
+    const nextTurn = room.turnOrder[room.currentTurnIndex];
+    room.currentTurn = nextTurn;
+
+    console.log(`🔁 Switching turn to ${nextTurn} (Round ${room.rounds})`);
+
+    io.to(mode).emit("turnSwitch", {
+      nextTurn,
+      currentTurnIndex: room.currentTurnIndex,
+      round: room.rounds,
+    });
+
+    // 🕒 ให้ host sync timer ใหม่ (แค่ครั้งเดียวต่อรอบ)
     const hostName = room.turnOrder[0];
     const hostSocket = findSocketByNickname(hostName);
     if (hostSocket) {
@@ -157,26 +234,23 @@ socket.on("resumeGame", ({ mode }) => {
       io.to(mode).emit("syncTimer", { mode, startTime });
       console.log(`🕒 Timer synced by host (${hostName}) for mode ${mode}`);
     }
-  }
-});
 
+    // ✅ ปลดล็อกหลัง 3 วินาที (กัน trigger ซ้ำจาก client อื่น)
+    setTimeout(() => {
+      roundLock[mode] = false;
+      console.log(`🔓 [UNLOCK] ${mode} ready for next resume`);
+    }, 3000);
+  });
 
-  /* 🧮 sync ผลลัพธ์ (จาก client) */
+  /* 🧮 sync ผลลัพธ์จาก client */
   socket.on("answerResult", (data) => {
     if (!data.mode) return;
     const room = gameRooms[data.mode];
     if (!room) return;
 
-    // ✅ Broadcast ผลให้ทุกคนเห็น
     io.to(data.mode).emit("answerResult", data);
 
-    // 🏁 เช็คว่าครบรอบหรือยัง
-    const nextIndex = (room.currentTurnIndex + 1) % room.turnOrder.length;
-    if (nextIndex === 0) {
-      room.rounds += 1;
-      io.to(data.mode).emit("endRound", { round: room.rounds });
-      console.log(`🏁 End of round ${room.rounds - 1} → starting new round`);
-    }
+
   });
 
   /* 🚪 ผู้เล่นออกกลางเกม */
@@ -186,11 +260,10 @@ socket.on("resumeGame", ({ mode }) => {
 
     console.log(`🚪 ${nickname} left ${mode}`);
 
-    // เอาออกจากลิสต์ผู้เล่น
     room.turnOrder = room.turnOrder.filter((n) => n !== nickname);
     room.players = room.players.filter((n) => n !== nickname);
 
-    // 💀 ถ้าเหลือ < 2 ให้จบเกม
+    // ถ้าเหลือ < 2 → จบเกมเลย
     if (room.turnOrder.length < 2) {
       io.to(mode).emit("gameover", { reason: "not_enough_players" });
       delete gameRooms[mode];
@@ -198,7 +271,7 @@ socket.on("resumeGame", ({ mode }) => {
       return;
     }
 
-    // 🔁 ถ้าออกตอนเป็นเทิร์นของตัวเอง → ส่งต่อทันที
+    // ถ้าออกตอนเป็นเทิร์นตัวเอง → ส่งต่อทันที
     if (room.currentTurn === nickname) {
       room.currentTurnIndex %= room.turnOrder.length;
       const nextTurn = room.turnOrder[room.currentTurnIndex];
@@ -229,6 +302,7 @@ socket.on("resumeGame", ({ mode }) => {
   socket.on("disconnect", () => {
     const player = players[socket.id];
     if (!player) return;
+
     console.log(`🔴 ${player.nickname} disconnected`);
 
     // เอาออกจาก waiting room ถ้ายังไม่ได้เริ่ม
@@ -236,6 +310,7 @@ socket.on("resumeGame", ({ mode }) => {
       waitingRooms[player.mode] = waitingRooms[player.mode].filter(
         (p) => p !== player.nickname
       );
+
       io.to(player.mode).emit("waitingList", {
         mode: player.mode,
         players: waitingRooms[player.mode],
@@ -247,7 +322,7 @@ socket.on("resumeGame", ({ mode }) => {
   });
 });
 
-/* 🧭 broadcast รายชื่อผู้เล่นทั้งหมด */
+/* 🧭 UPDATE PLAYER LIST --------------------------------------------- */
 function updatePlayerList() {
   const list = Object.values(players)
     .filter((p) => p.isOnline)
@@ -255,11 +330,12 @@ function updatePlayerList() {
   io.emit("playerList", list);
 }
 
-/* 🔍 หาช่องจาก nickname */
+/* 🔍 FIND SOCKET BY NICKNAME ---------------------------------------- */
 function findSocketByNickname(name) {
   return Object.keys(players).find((id) => players[id]?.nickname === name);
 }
 
+/* 🟢 START SERVER ---------------------------------------------------- */
 server.listen(4000, () =>
   console.log("✅ Server running on port 4000 (multi-turn, rounds, and reconnect safe)")
 );
