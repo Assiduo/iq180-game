@@ -2,6 +2,10 @@ import express from "express";
 import http from "http";
 import { Server } from "socket.io";
 import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /* 🚀 INITIAL SETUP -------------------------------------------------- */
 const app = express();
@@ -14,6 +18,45 @@ const io = new Server(server, { cors: { origin: "*" } });
 let players = {}; // { socket.id: { nickname, mode, isOnline } }
 let waitingRooms = { easy: [], hard: [] };
 let gameRooms = {}; // { mode: { players, turnOrder, currentTurnIndex, currentTurn, rounds } }
+
+/* 🧰 ADMIN API (ADD HERE) ------------------------------------------- */
+// GET /admin/clients  -> online count, list, and room snapshots
+app.get("/admin/clients", (_req, res) => {
+  const online = Object.values(players)
+    .filter((p) => p.isOnline)
+    .map((p) => p.nickname);
+
+  const rooms = Object.fromEntries(
+    Object.entries(gameRooms).map(([mode, r]) => [
+      mode,
+      r
+        ? {
+            players: r.players,
+            turnOrder: r.turnOrder,
+            currentTurn: r.currentTurn,
+            rounds: r.rounds,
+          }
+        : null,
+    ])
+  );
+
+  res.json({ onlineCount: online.length, online, rooms });
+});
+
+// POST /admin/reset -> clear server state and end any running games
+app.post("/admin/reset", (_req, res) => {
+  waitingRooms = { easy: [], hard: [] };
+  gameRooms = {};
+  // keep players but detach them from rooms
+  for (const id of Object.keys(players)) {
+    if (players[id]) {
+      players[id].mode = null;
+    }
+  }
+  io.emit("gameover", { reason: "reset_by_admin" });
+  updatePlayerList();
+  res.json({ ok: true });
+});
 
 /* ⚙️ SOCKET EVENTS --------------------------------------------------- */
 
