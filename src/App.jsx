@@ -30,7 +30,7 @@ import timeoutSoundFile from "./sounds/timeout.mp3";
 import bgmFile from "./sounds/bgm.mp3";
 
 import { io } from "socket.io-client";
-const socket = io("http://10.202.213.168:4000");
+const socket = io("http://192.168.1.48:4000");
 //ถ้าเปลี่ยน router แม้ใช้ wifi ชื่อเดียวกัน ก็ต้องใส่ ip ใหม่
 // เข้า Terminal เครื่อง แล้วพิมพ์:
 // "ipconfig" (Window)
@@ -244,6 +244,10 @@ const [baseTime, setBaseTime] = useState(null);
 const [timeLeft, setTimeLeft] = useState(60);
 const [running, setRunning] = useState(false);
 const timerRef = useRef(null);
+
+const [reactionPopup, setReactionPopup] = useState(null);
+const [personalBest, setPersonalBest] = useState(0);
+
 
 /* ✅ เมื่อถึงตาเราเล่น */
 socket.on("yourTurn", ({ mode }) => {
@@ -719,6 +723,19 @@ useEffect(() => {
     }
   });
 
+  socket.on("reaction", (data) => {
+    console.log("🎭 Reaction received:", data);
+    setReactionPopup(`${data.from}: ${data.emoji}`);
+
+    // hide popup after 2 seconds
+    setTimeout(() => setReactionPopup(null), 2000);
+  });
+
+  socket.on("personalBest", (data) => {
+    console.log("🏆 Personal best received:", data);
+    setPersonalBest(data.best);
+  });
+
 
   // 🧹 cleanup (สำคัญมาก ป้องกัน event ซ้ำ)
   return () => {
@@ -733,6 +750,8 @@ useEffect(() => {
     socket.off("answerResult");
     socket.off("playerLeft");
     socket.off("roundResult");
+    socket.off("reaction");
+    socket.off("personalBest");
   };
 }, [nickname, page, mode]);
 
@@ -892,6 +911,7 @@ useEffect(() => {
 
         // go to mode chooser
         setPage("mode");
+        socket.emit("getPersonalBest", { nickname });
       }
 
       else if (page === "waiting" || page === "mode") {
@@ -1007,6 +1027,10 @@ useEffect(() => {
         {T.hard}
       </button>
     </div>
+    <div className="personal-best">
+      🏆 Personal Best: {personalBest}
+    </div>
+
   </motion.div>
 )}
 
@@ -1155,7 +1179,6 @@ useEffect(() => {
   )}
 </div>
 
-
     {/* 🎮 GAME BODY */}
 {!isMyTurn ? (
   // ---------------- WAITING TURN ----------------
@@ -1179,6 +1202,12 @@ useEffect(() => {
     <p className="hint-text">
       Please wait until it's your turn to play.
     </p>
+    <div className="reactions">
+      <button onClick={() => socket.emit("reaction", { mode, emoji: "👏", nickname })}>👏</button>
+      <button onClick={() => socket.emit("reaction", { mode, emoji: "😮", nickname })}>😮</button>
+      <button onClick={() => socket.emit("reaction", { mode, emoji: "😭", nickname })}>😭</button>
+      <button onClick={() => socket.emit("reaction", { mode, emoji: "🔥", nickname })}>🔥</button>
+    </div>
   </div>
 ) : (
   // ---------------- ACTIVE TURN ----------------
@@ -1260,6 +1289,12 @@ useEffect(() => {
         {T.submit}
       </button>
     </div>
+    <div className="reactions">
+      <button onClick={() => socket.emit("reaction", { mode, emoji: "👏", nickname })}>👏</button>
+      <button onClick={() => socket.emit("reaction", { mode, emoji: "😮", nickname })}>😮</button>
+      <button onClick={() => socket.emit("reaction", { mode, emoji: "😭", nickname })}>😭</button>
+      <button onClick={() => socket.emit("reaction", { mode, emoji: "🔥", nickname })}>🔥</button>
+    </div>
   </>
 )}
 
@@ -1333,6 +1368,9 @@ useEffect(() => {
 )}
 
   </motion.div>
+)}
+{reactionPopup && (
+  <div className="reaction-popup">{reactionPopup}</div>
 )}
 
 {resultPopup === "endRound" && (

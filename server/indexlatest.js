@@ -14,6 +14,8 @@ const io = new Server(server, { cors: { origin: "*" } });
 let players = {}; // { socket.id: { nickname, mode, isOnline } }
 let waitingRooms = { easy: [], hard: [] };
 let gameRooms = {}; // { mode: { players, turnOrder, currentTurnIndex, currentTurn, rounds } }
+// 🏆 Global personal bests (nickname → highest score)
+const personalBests = {};
 
 /* ⚙️ SOCKET EVENTS --------------------------------------------------- */
 
@@ -288,6 +290,13 @@ io.on("connection", (socket) => {
                     if (!room.scores[p]) room.scores[p] = 0;
                 });
                 room.scores[winner.player] += 1;
+                // 🏆 Update personal best if this is higher
+                const nickname = winner.player;
+                const newScore = room.scores[nickname];
+                if (!personalBests[nickname] || newScore > personalBests[nickname]) {
+                    personalBests[nickname] = newScore;
+                    console.log(`🏅 New personal best for ${nickname}: ${newScore}`);
+                }
 
                 io.to(data.mode).emit("roundResult", {
                     winner: winner.player,
@@ -377,6 +386,21 @@ io.on("connection", (socket) => {
         player.isOnline = false;
         updatePlayerList();
     });
+    // 🎭 Reaction event (simple emoji reactions between players)
+    socket.on("reaction", (data) => {
+        const { mode, emoji, nickname } = data;
+        console.log(`🎭 ${nickname} reacted with ${emoji} in mode ${mode}`);
+        io.to(mode).emit("reaction", { emoji, from: nickname });
+    });
+
+    // 🔍 When a client asks for their personal best
+    socket.on("getPersonalBest", (data) => {
+        const { nickname } = data;
+        const best = personalBests[nickname] || 0;
+        socket.emit("personalBest", { nickname, best });
+    });
+
+
 });
 
 /* 🧭 UPDATE PLAYER LIST --------------------------------------------- */
