@@ -243,8 +243,8 @@ io.on("connection", (socket) => {
         const hostSocket = findSocketByNickname(hostName);
         if (hostSocket) {
             const startTime = Date.now();
-            io.to(mode).emit("syncTimer", { mode, startTime });
             room.startTime = startTime;
+            io.to(mode).emit("syncTimer", { mode, startTime });
             console.log(`🕒 Timer synced by host (${hostName}) for mode ${mode}`);
         }
 

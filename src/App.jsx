@@ -30,7 +30,7 @@ import timeoutSoundFile from "./sounds/timeout.mp3";
 import bgmFile from "./sounds/bgm.mp3";
 
 import { io } from "socket.io-client";
-const socket = io("http://10.203.230.163:4000");
+const socket = io("http://10.202.213.168:4000");
 //ถ้าเปลี่ยน router แม้ใช้ wifi ชื่อเดียวกัน ก็ต้องใส่ ip ใหม่
 // เข้า Terminal เครื่อง แล้วพิมพ์:
 // "ipconfig" (Window)
@@ -56,6 +56,7 @@ export default function App() {
       delete: "Clear",
       submit: "Submit",
       correct: "✅ Correct!",
+      late: "⏳ Too Late!",
       wrong: "❌ Wrong!",
       timeout: "⏰ Time’s Up!",
       playAgain: "Play Again",
@@ -85,6 +86,7 @@ export default function App() {
       delete: "ลบ",
       submit: "ตรวจคำตอบ",
       correct: "✅ ถูกต้อง!",
+      late: "⏳ สายไปแล้ว!",
       wrong: "❌ ผิด!",
       timeout: "⏰ หมดเวลา!",
       playAgain: "เล่นต่อ",
@@ -114,6 +116,7 @@ export default function App() {
       delete: "删除",
       submit: "提交",
       correct: "✅ 正确!",
+      late: "⏳ 太迟了!",
       wrong: "❌ 错误!",
       timeout: "⏰ 时间到!",
       playAgain: "再玩一次",
@@ -409,7 +412,6 @@ const checkAnswer = () => {
 // 🧮 หลังตรวจคำตอบเสร็จ
 if (correct) {
   playSound("correct");
-  setScore((s) => s + 1);
   setResultPopup("correct");
 } else {
   playSound("wrong");
@@ -686,6 +688,37 @@ useEffect(() => {
     }
   });
 
+  // 🎯 When the server announces round results
+  socket.on("roundResult", (data) => {
+    console.log("🎯 Round result received:", data);
+
+    // Update your local score from the server’s truth
+    const myServerScore = data.scores?.[nickname] || 0;
+    setScore(myServerScore);
+
+    // find my answer object and the winner
+    const myAnswer = data.answers?.find((a) => a.player === nickname);
+    const winner = data.winner;
+
+    if (!myAnswer) return; // safety
+
+    if (myAnswer.correct) {
+      if (nickname === winner) {
+        // 🏆 I was fastest correct
+        playSound("correct");
+        setResultPopup("correct");
+      } else {
+        // ⏰ I was correct but slower
+        playSound("wrong");
+        setResultPopup("late");
+      }
+    } else {
+      // ❌ I was wrong or didn't answer
+      playSound("wrong");
+      setResultPopup("wrong");
+    }
+  });
+
 
   // 🧹 cleanup (สำคัญมาก ป้องกัน event ซ้ำ)
   return () => {
@@ -699,6 +732,7 @@ useEffect(() => {
     socket.off("yourTurn");
     socket.off("answerResult");
     socket.off("playerLeft");
+    socket.off("roundResult");
   };
 }, [nickname, page, mode]);
 
