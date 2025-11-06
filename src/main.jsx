@@ -1,10 +1,21 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import './index.css'
-import App from './App.jsx'
+// src/main.jsx
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import "./index.css";
 
-createRoot(document.getElementById('root')).render(
+import App from "./App.jsx";
+import Admin from "./Admin.jsx";
+
+createRoot(document.getElementById("root")).render(
   <StrictMode>
-    <App />
-  </StrictMode>,
-)
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<App />} />
+        <Route path="/admin" element={<Admin />} />
+        {/* Optional fallback: redirect any unknown path to home */}
+        <Route path="*" element={<App />} />
+      </Routes>
+    </BrowserRouter>
+  </StrictMode>
+);
