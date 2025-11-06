@@ -30,7 +30,7 @@ import timeoutSoundFile from "./sounds/timeout.mp3";
 import bgmFile from "./sounds/bgm.mp3";
 
 import { io } from "socket.io-client";
-const socket = io("http://192.168.1.166:4000");
+const socket = io("http://192.168.1.48:4000");
 //ถ้าเปลี่ยน router แม้ใช้ wifi ชื่อเดียวกัน ก็ต้องใส่ ip ใหม่
 // เข้า Terminal เครื่อง แล้วพิมพ์:
 // "ipconfig" (Window)
@@ -53,9 +53,10 @@ export default function App() {
       target: "Target",
       timeLeft: "Time Left",
       score: "Score",
-      delete: "Delete",
+      delete: "Clear",
       submit: "Submit",
       correct: "✅ Correct!",
+      late: "⏳ Too Late!",
       wrong: "❌ Wrong!",
       timeout: "⏰ Time’s Up!",
       playAgain: "Play Again",
@@ -85,6 +86,7 @@ export default function App() {
       delete: "ลบ",
       submit: "ตรวจคำตอบ",
       correct: "✅ ถูกต้อง!",
+      late: "⏳ สายไปแล้ว!",
       wrong: "❌ ผิด!",
       timeout: "⏰ หมดเวลา!",
       playAgain: "เล่นต่อ",
@@ -114,6 +116,7 @@ export default function App() {
       delete: "删除",
       submit: "提交",
       correct: "✅ 正确!",
+      late: "⏳ 太迟了!",
       wrong: "❌ 错误!",
       timeout: "⏰ 时间到!",
       playAgain: "再玩一次",
@@ -246,6 +249,10 @@ const [baseTime, setBaseTime] = useState(null);
 const [timeLeft, setTimeLeft] = useState(60);
 const [running, setRunning] = useState(false);
 const timerRef = useRef(null);
+
+const [reactionPopup, setReactionPopup] = useState(null);
+const [personalBest, setPersonalBest] = useState(0);
+
 
 /* ✅ เมื่อถึงตาเราเล่น */
 socket.on("yourTurn", ({ mode }) => {
@@ -428,35 +435,58 @@ const checkAnswer = () => {
       });
     }
 
-    // ⏳ เริ่ม auto resume
-    let count = 3;
-    setAutoResumeCount(count);
-    const timer = setInterval(() => {
-      count -= 1;
-      setAutoResumeCount(count);
-      if (count <= 0) {
-        clearInterval(timer);
-        setAutoResumeCount(null);
-        setResultPopup(null);
-        if (isMyTurn) {
-          socket.emit("resumeGame", { mode });
-          setIsMyTurn(false);
-        }
-        
-      }
-    }, 1000);
+// 🧮 หลังตรวจคำตอบเสร็จ
+if (correct) {
+  playSound("correct");
+  setScore((s) => s + 1);
+  setResultPopup("correct");
+
+  setSolutionExpr(""); // ไม่ต้องแสดงเฉลยเพราะตอบถูก
+} else {
+  playSound("wrong");
+  setResultPopup("wrong");
+
+  // 🧠 หาเฉลยอัตโนมัติ
+  try {
+    const sol = findSolution(digits, target, disabledOps);
+    setSolutionExpr(sol || "No valid solution found");
   } catch (err) {
-    console.error("❌ Expression error:", err);
-    setResultPopup("invalid");
+    console.error("❌ findSolution error:", err);
+    setSolutionExpr("No valid solution found");
   }
-};
-// 🛑 STOP TIMER (safe)
-const stopTimer = () => {
-  if (timerRef.current) {
+}
+
+// ⏳ เริ่ม auto resume (show popup for a few seconds, then resume)
+if (typeof setAutoResumeCount === "function") {
+  // clear any existing timer
+  if (timerRef && timerRef.current) {
     clearInterval(timerRef.current);
     timerRef.current = null;
   }
-};
+
+  let count = 3;
+  setAutoResumeCount(count);
+
+  // save interval id to ref so other code can stop it
+  timerRef.current = setInterval(() => {
+    count -= 1;
+    setAutoResumeCount(count);
+
+    if (count <= 0) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+      setAutoResumeCount(null);
+      setResultPopup(null);
+
+      // if it's our turn, emit resume and toggle turn flag
+      if (isMyTurn) {
+        socket.emit("resumeGame", { mode });
+        setIsMyTurn(false);
+      }
+    }
+  }, 1000);
+}
+
 
 // 👑 HOST CHECK (คงไว้เสมอ เผื่อ JSX ใช้)
 const isHost = gameState?.turnOrder?.[0] === nickname;
@@ -795,6 +825,50 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
     }
   });
 
+  // 🎯 When the server announces round results
+  socket.on("roundResult", (data) => {
+    console.log("🎯 Round result received:", data);
+
+    // Update your local score from the server’s truth
+    const myServerScore = data.scores?.[nickname] || 0;
+    setScore(myServerScore);
+
+    // find my answer object and the winner
+    const myAnswer = data.answers?.find((a) => a.player === nickname);
+    const winner = data.winner;
+
+    if (!myAnswer) return; // safety
+
+    if (myAnswer.correct) {
+      if (nickname === winner) {
+        // 🏆 I was fastest correct
+        playSound("correct");
+        setResultPopup("correct");
+      } else {
+        // ⏰ I was correct but slower
+        playSound("wrong");
+        setResultPopup("late");
+      }
+    } else {
+      // ❌ I was wrong or didn't answer
+      playSound("wrong");
+      setResultPopup("wrong");
+    }
+  });
+
+  socket.on("reaction", (data) => {
+    console.log("🎭 Reaction received:", data);
+    setReactionPopup(`${data.from}: ${data.emoji}`);
+
+    // hide popup after 2 seconds
+    setTimeout(() => setReactionPopup(null), 2000);
+  });
+
+  socket.on("personalBest", (data) => {
+    console.log("🏆 Personal best received:", data);
+    setPersonalBest(data.best);
+  });
+
 
   // 🧹 cleanup (สำคัญมาก ป้องกัน event ซ้ำ)
   return () => {
@@ -808,6 +882,9 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
     socket.off("yourTurn");
     socket.off("answerResult");
     socket.off("playerLeft");
+    socket.off("roundResult");
+    socket.off("reaction");
+    socket.off("personalBest");
   };
 }, [nickname, page, mode]);
 
@@ -929,26 +1006,52 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
   <button
     className="back-btn"
     onClick={() => {
+
       playSound("click");
 
       if (page === "game") {
-        stopTimer();
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+        setRunning(false);
+        setBaseTime(null); // optional, but keeps the global timer logic quiet // make sure this clears any intervals/timeouts
 
-        // ✅ ใช้ mode จาก gameState ถ้ามี (กัน state ค้าง)
         const activeMode = gameState?.mode || mode;
 
-        socket.emit("playerLeftGame", {
-          nickname,
-          mode: activeMode,
-        });
+        // tell server you left the game room
+        socket.emit("playerLeftGame", { nickname, mode: activeMode });
 
+        // 🚫 stop reacting to in-game events (prevents snap-back to "game")
+        socket.off("gameStart");
+        socket.off("yourTurn");
+        socket.off("turnSwitch");
+        socket.off("newRound");
+        socket.off("syncTimer");
+        socket.off("answerResult");
+
+
+        // 🔹 Reset gameplay states
         setRunning(false);
         setIsMyTurn(false);
-        setPage("mode"); // กลับไปหน้าเลือกโหมด
-      } 
+        setExpression("");
+        setTarget(null);
+        setDigits([]);
+        setOperators([]);
+        setDisabledOps([]);
+        setResultPopup(null);
+        setSolution(null);
+
+        // go to mode chooser
+        setPage("mode");
+        socket.emit("getPersonalBest", { nickname });
+      }
+
       else if (page === "waiting" || page === "mode") {
         socket.emit("leaveLobby", nickname);
         socket.disconnect();
+        socket.connect(); // reconnects, gets new socket.id
+        socket.emit("setNickname", nickname);
         setPage("login");
       } 
       else {
@@ -1057,6 +1160,10 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
         {T.hard}
       </button>
     </div>
+    <div className="personal-best">
+      🏆 Personal Best: {personalBest}
+    </div>
+
   </motion.div>
 )}
 
@@ -1241,7 +1348,6 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
   )}
 </div>
 
-
     {/* 🎮 GAME BODY */}
 {!isMyTurn ? (
   // ---------------- WAITING TURN ----------------
@@ -1265,6 +1371,12 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
     <p className="hint-text">
       Please wait until it's your turn to play.
     </p>
+    <div className="reactions">
+      <button onClick={() => socket.emit("reaction", { mode, emoji: "👏", nickname })}>👏</button>
+      <button onClick={() => socket.emit("reaction", { mode, emoji: "😮", nickname })}>😮</button>
+      <button onClick={() => socket.emit("reaction", { mode, emoji: "😭", nickname })}>😭</button>
+      <button onClick={() => socket.emit("reaction", { mode, emoji: "🔥", nickname })}>🔥</button>
+    </div>
   </div>
 ) : (
   // ---------------- ACTIVE TURN ----------------
@@ -1366,7 +1478,7 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
         className="equal-btn glass-btn"
         onClick={() => {
           playSound("click");
-          setExpression((p) => p.slice(0, -1));
+          setExpression(() => "");
           setLastWasNumber(false);
           setLastWasSqrt(false);
         }}
@@ -1383,6 +1495,12 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
       >
         {T.submit}
       </button>
+    </div>
+    <div className="reactions">
+      <button onClick={() => socket.emit("reaction", { mode, emoji: "👏", nickname })}>👏</button>
+      <button onClick={() => socket.emit("reaction", { mode, emoji: "😮", nickname })}>😮</button>
+      <button onClick={() => socket.emit("reaction", { mode, emoji: "😭", nickname })}>😭</button>
+      <button onClick={() => socket.emit("reaction", { mode, emoji: "🔥", nickname })}>🔥</button>
     </div>
   </>
 )}
@@ -1473,6 +1591,9 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
 )}
 
   </motion.div>
+)}
+{reactionPopup && (
+  <div className="reaction-popup">{reactionPopup}</div>
 )}
 
 {resultPopup === "endRound" && (
