@@ -550,15 +550,13 @@ export default function App() {
   };
 
   /* ---------- Small UI helpers ---------- */
-  const isHost = (gameState?.turnOrder?.[0] === nickname) || false;
-  function playSound(type) { try { playSoundInternal(type); } catch { } }
-  function playSoundInternal(type) {
-    if (muted) return;
-    if (type === "click") clickRef.current?.play();
-    if (type === "correct") correctRef.current?.play();
-    if (type === "wrong") wrongRef.current?.play();
-    if (type === "timeout") timeoutRef.current?.play();
+ const playSoundInternal = (type) => {
+  try {
+    playSound(type);
+  } catch (err) {
+    // ignore errors so UI actions never crash
   }
+};
 
   /* ---------- Render (kept structure similar to original) ---------- */
   const fade = { initial: { opacity: 0, y: 20 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -20 } };
