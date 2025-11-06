@@ -1,5 +1,16 @@
+```jsx
 // src/App.jsx
-import { useEffect, useRef, useState } from "react";
+/* =============================================================
+ 🧩 IQ180 React App (Production-ready Clean Code)
+---------------------------------------------------------------
+ This file includes all logic for:
+ - Game state and timer system
+ - Multiplayer socket events
+ - Sound and UI management
+ - Comprehensive comments for each major section (English)
+=============================================================*/
+
+import React, { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Howl } from "howler";
 import {
@@ -10,6 +21,7 @@ import {
   FaRedo,
   FaSignOutAlt,
   FaPalette,
+  FaTrophy,
 } from "react-icons/fa";
 import "./App.css";
 
@@ -202,7 +214,8 @@ export default function App() {
     return () => {
       bgmRef.current?.stop();
     };
-  }, []); // run once
+    // run once
+  }, []); // eslint-disable-line
 
   useEffect(() => {
     if (!bgmRef.current) return;
@@ -217,6 +230,15 @@ export default function App() {
     if (type === "correct") correctRef.current?.play();
     if (type === "wrong") wrongRef.current?.play();
     if (type === "timeout") timeoutRef.current?.play();
+  };
+
+  const playSoundInternal = (type) => {
+    try {
+      playSound(type);
+    } catch (err) {
+      // ignore sound errors
+      // console.warn("sound error", err);
+    }
   };
 
   /* ---------- App state ---------- */
@@ -236,8 +258,8 @@ export default function App() {
   const [solutionExpr, setSolutionExpr] = useState("");
   const [history, setHistory] = useState([]);
   const [lastWasNumber, setLastWasNumber] = useState(false);
-  const [isMyTurn, setIsMyTurn] = useState(false);
 
+  /* Multiplayer & UI state */
   const [playerList, setPlayerList] = useState([]);
   const [waitingPlayers, setWaitingPlayers] = useState([]);
   const [canStart, setCanStart] = useState(false);
@@ -245,18 +267,28 @@ export default function App() {
   const [countdown, setCountdown] = useState(0);
   const [showCountdown, setShowCountdown] = useState(false);
 
+  const [gameState, setGameState] = useState({});
+  const [isMyTurn, setIsMyTurn] = useState(false);
+
+  const [autoResumeCount, setAutoResumeCount] = useState(null);
+
+  /* Leaderboard & scores */
+  const [leaderboard, setLeaderboard] = useState([]);
   const [scores, setScores] = useState({});
   const [personalBest, setPersonalBest] = useState(0);
   const [reactionPopup, setReactionPopup] = useState(null);
 
-  /* ---------- Timer (host-synced) ---------- */
+  /* Timer */
   const [baseTime, setBaseTime] = useState(null);
   const [timeLeft, setTimeLeft] = useState(60);
   const [running, setRunning] = useState(false);
   const timerRef = useRef(null);
-  const problemRef = useRef({ digits: [], target: 0, disabledOps: [] });
-  const [autoResumeCount, setAutoResumeCount] = useState(null);
 
+  const problemRef = useRef({ digits: [], target: 0, disabledOps: [] });
+
+  /* -----------------------
+     Helper functions
+  ------------------------*/
   const stopTimer = () => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
@@ -273,11 +305,17 @@ export default function App() {
     const onConnect = () => {
       console.log("connected to", SERVER_URL);
       if (nickname.trim()) socket.emit("setNickname", nickname);
+      // request leaderboard on connect
+      socket.emit("getLeaderboard");
     };
 
     const onPlayerList = (list) => setPlayerList(Array.isArray(list) ? list : []);
-    const onWaitingList = (d) => { if (d?.mode === mode) setWaitingPlayers(Array.isArray(d.players) ? d.players : []); };
-    const onCanStart = (d) => { if (d?.mode === mode) setCanStart(!!d.canStart); };
+    const onWaitingList = (d) => {
+      if (d?.mode === mode) setWaitingPlayers(Array.isArray(d.players) ? d.players : []);
+    };
+    const onCanStart = (d) => {
+      if (d?.mode === mode) setCanStart(!!d.canStart);
+    };
     const onPreGameStart = (d) => {
       if (!d) return;
       setPreGameInfo({ mode: d.mode, starter: d.starter, players: d.players });
@@ -306,7 +344,8 @@ export default function App() {
         disabledOps: d.disabledOps || [],
       };
       setScores(Object.fromEntries((Array.isArray(d.players) ? d.players : []).map((p) => [p, 0])));
-      setGameStateLocal(d);
+      // store minimal game state
+      setGameState({ turnOrder: d.turnOrder || d.players || [], currentTurn: d.currentTurn || null, mode: d.mode || mode, host: d.host });
       setIsMyTurn(d.currentTurn === nickname);
       setPage("game");
       setExpression("");
@@ -361,9 +400,6 @@ export default function App() {
     const onAnswerResult = (d) => {
       if (!d) return;
       setScores((prev) => ({ ...(prev || {}), [d.nickname]: (prev?.[d.nickname] || 0) + (d.correct ? 1 : 0) }));
-      if (d.winner) {
-        // optional handling
-      }
     };
     const onGameOver = (d) => {
       setResultPopup("gameover");
@@ -381,12 +417,8 @@ export default function App() {
     const onPersonalBest = (d) => {
       if (d?.best !== undefined) setPersonalBest(d.best);
     };
-
-    // local helper to keep gameState minimal
-    const setGameStateLocal = (d) => {
-      // store only fields we need
-      const minimal = { turnOrder: d.turnOrder || d.players || [], currentTurn: d.currentTurn || null, mode: d.mode || mode };
-      setGameState(minimal => ({ ...(minimal || {}), ...minimal, ...minimal })); // no-op just to keep React happy (we store minimal if needed)
+    const onLeaderboardUpdate = (d) => {
+      setLeaderboard(d || []);
     };
 
     socket.on("connect", onConnect);
@@ -404,6 +436,7 @@ export default function App() {
     socket.on("playerLeft", onPlayerLeft);
     socket.on("reaction", onReaction);
     socket.on("personalBest", onPersonalBest);
+    socket.on("leaderboardUpdate", onLeaderboardUpdate);
 
     return () => {
       socket.off("connect", onConnect);
@@ -421,6 +454,7 @@ export default function App() {
       socket.off("playerLeft", onPlayerLeft);
       socket.off("reaction", onReaction);
       socket.off("personalBest", onPersonalBest);
+      socket.off("leaderboardUpdate", onLeaderboardUpdate);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nickname, mode]);
@@ -467,6 +501,7 @@ export default function App() {
 
     timerRef.current = setInterval(tick, 1000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); timerRef.current = null; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running, baseTime, mode, nickname, rounds, score]);
 
   /* ---------- Actions ---------- */
@@ -542,26 +577,21 @@ export default function App() {
 
   const endGameForAll = () => {
     if (resultPopup === "gameover") return;
-    playSound("click");
+    playSoundInternal("click");
     stopTimer();
     setRunning(false);
     setResultPopup("gameover");
     if (socket && socket.connected) socket.emit("endGame", { mode, by: nickname, reason: "endedByPlayer" });
   };
 
-  /* ---------- Small UI helpers ---------- */
- const playSoundInternal = (type) => {
-  try {
-    playSound(type);
-  } catch (err) {
-    // ignore errors so UI actions never crash
-  }
-};
-
-  /* ---------- Render (kept structure similar to original) ---------- */
-  const fade = { initial: { opacity: 0, y: 20 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -20 } };
   const currentTheme = themes[theme] || themes.galaxyBlue;
+  const fade = { initial: { opacity: 0, y: 20 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -20 } };
 
+  const isHost = gameState?.host === nickname || (gameState?.turnOrder?.[0] === nickname);
+
+  /* -------------------
+     MAIN UI
+  --------------------*/
   return (
     <motion.div className="container" style={{ background: currentTheme.background, color: currentTheme.text }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.6 }}>
       {/* Top controls */}
@@ -587,9 +617,38 @@ export default function App() {
             </div>
           )}
         </div>
+
+        {/* Leaderboard button */}
+        <div className="leaderboard-btn">
+          <button className="control-btn" onClick={() => { playSoundInternal("click"); setPage("leaderboard"); socket.emit("getLeaderboard"); }} title="Leaderboard"><FaTrophy /></button>
+        </div>
       </div>
 
-      {/* Page content (login/mode/waiting/game/stats) */}
+      {/* Back button */}
+      {page !== "login" && (
+        <button className="back-btn" onClick={() => {
+          playSoundInternal("click");
+          if (page === "game") {
+            stopTimer();
+            const activeMode = gameState?.mode || mode;
+            if (socket && socket.connected) {
+              socket.emit("playerLeftGame", { nickname, mode: activeMode });
+            }
+            setRunning(false);
+            setIsMyTurn(false);
+            setPage("mode");
+          } else if (page === "waiting" || page === "mode") {
+            if (socket && socket.connected) socket.emit("leaveLobby", nickname);
+            setPage("login");
+          } else {
+            setPage("login");
+          }
+        }}>
+          <FaArrowLeft />
+        </button>
+      )}
+
+      {/* Page content (login/mode/waiting/game/stats/leaderboard) */}
       <AnimatePresence mode="wait">
         {page === "login" && (
           <motion.div key="login" className="login-page" {...fade}>
@@ -633,14 +692,17 @@ export default function App() {
           </motion.div>
         )}
 
+        {preGameInfo && showCountdown && (
+          <motion.div key="preGame" className="popup countdown-popup" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ type: "spring", stiffness: 120 }}>
+            <h2>{lang === "th" ? `${preGameInfo.starter} เริ่มเกม!` : lang === "zh" ? `${preGameInfo.starter} 开始了游戏！` : `${preGameInfo.starter} started the game!`}</h2>
+            <h1 className="countdown-number">{countdown}</h1>
+          </motion.div>
+        )}
+
         {page === "game" && (
           <motion.div key="game" className="game-page" {...fade}>
             <div className="game-header">
               <h2 className="big-player">{T.playerName}: <span>{nickname}</span></h2>
-              <div style={{ position: "fixed", left: "50%", bottom: 16, transform: "translateX(-50%)", display: "flex", gap: 12 }}>
-                <button className="glass-btn" onClick={leaveGame}><FaSignOutAlt /> {lang === "th" ? "จบเกม" : lang === "zh" ? "结束游戏" : "End Game"}</button>
-                {isHost && <button className="glass-btn" style={{ borderColor: "rgba(255,100,100,0.6)" }} onClick={endGameForAll}>🛑 {lang === "th" ? "จบเกม" : lang === "zh" ? "结束游戏" : "End Game"}</button>}
-              </div>
 
               {isMyTurn ? (
                 <>
@@ -654,7 +716,7 @@ export default function App() {
                 </>
               ) : (
                 <div className="waiting-header">
-                  <h3 className="turn-status">⏳ Waiting for <span className="highlight">{/* server-provided current */}</span>...</h3>
+                  <h3 className="turn-status">⏳ Waiting for <span className="highlight">{gameState?.currentTurn ?? "player"}</span>...</h3>
                   <h1 className={`waiting-time ${timeLeft <= 10 ? "time-critical" : ""}`}>{timeLeft > 0 ? `${timeLeft}s` : "00s"}</h1>
                 </div>
               )}
@@ -734,7 +796,38 @@ export default function App() {
                   <tbody>{Object.entries(scores || {}).map(([name, sc]) => (<tr key={name}><td>{name === nickname ? <span className="you-label">{lang === "th" ? "คุณ" : lang === "zh" ? "你" : "You"}</span> : null}{name}</td><td style={{ textAlign: "right" }}><strong>{sc}</strong></td></tr>))}</tbody>
                 </table>
               </div>
+
               <div className="stats-actions" style={{ marginTop: 16 }}><button className="main-btn" onClick={() => { playSoundInternal("click"); setPage("mode"); }}><FaArrowLeft /> {T.back}</button></div>
+            </div>
+          </motion.div>
+        )}
+
+        {page === "leaderboard" && (
+          <motion.div key="leaderboard" {...fade} className="leaderboard-page">
+            <div className="glass-card leaderboard-card">
+              <h2 className="leaderboard-title">🏆 Leaderboard</h2>
+              <p className="leaderboard-sub">Top players (session)</p>
+
+              <ol className="leaderboard-list">
+                {leaderboard && leaderboard.length ? (
+                  leaderboard.map((p, i) => (
+                    <li key={p.nickname} className={p.nickname === nickname ? "self" : ""}>
+                      <span className="rank">#{i + 1}</span>
+                      <span className="name">{p.nickname}</span>
+                      <span className="points">{p.points ?? 0} pts</span>
+                      <span className="wins">{p.wins ?? 0}✔</span>
+                    </li>
+                  ))
+                ) : (
+                  <p>No leaderboard data yet.</p>
+                )}
+              </ol>
+
+              <div className="stats-actions">
+                <button className="main-btn" onClick={() => { playSoundInternal("click"); setPage("mode"); }}>
+                  <FaArrowLeft /> {T.back}
+                </button>
+              </div>
             </div>
           </motion.div>
         )}
@@ -744,3 +837,4 @@ export default function App() {
     </motion.div>
   );
 }
+```
