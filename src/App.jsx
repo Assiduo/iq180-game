@@ -772,9 +772,10 @@ export default function App() {
             <div className="online-box glass-card">
               <h3 className="online-title">👥 {lang === "th" ? "ผู้เล่นที่ออนไลน์" : lang === "zh" ? "在线玩家" : "Players Online"}</h3>
               {playerList && playerList.length > 0 ? (
-                <ul className="online-list">{playerList.map((p, i) => <li key={i} className={p === nickname ? "self" : ""}>{p === nickname ? <span className="you-label">{lang === "th" ? "คุณ" : lang === "zh" ? "你" : "You"}</span> : null}{p}</li>)}</ul>
-              ) : (<p className="online-empty">{lang === "th" ? "ไม่มีผู้เล่นออนไลน์" : lang === "zh" ? "暂无在线玩家" : "No players online"}</p>)}
-            </div>
+                <ul className="online-list">{playerList.map((p, i) =>p === nickname ? (<li key={i} className="self"><span className="you-label">{lang === "th" ? "คุณ" : lang === "zh" ? "你" : "You"}</span>
+                </li>) : (
+                <li key={i}>{p}</li>))}</ul>) : (<p className="online-empty">{lang === "th"? "ไม่มีผู้เล่นออนไลน์": lang === "zh"? "暂无在线玩家": "No players online"}</p>)}
+                    </div>
 
             <h1 className="select-mode-title">{T.selectMode}</h1>
             <div className="mode-buttons">
