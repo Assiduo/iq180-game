@@ -18,43 +18,150 @@ const io = new Server(server, { cors: { origin: "*" } });
 let players = {}; // { socket.id: { nickname, mode, isOnline } }
 let waitingRooms = { easy: [], hard: [] };
 let gameRooms = {}; // { mode: { players, turnOrder, currentTurnIndex, currentTurn, rounds } }
+// 🏆 Global personal bests (nickname → highest score)
+const personalBests = {};
 
 /* ⚙️ SOCKET EVENTS --------------------------------------------------- */
-
-/* 🎲 SERVER PROBLEM GENERATOR -------------------------------------- */
 function createExpressionWithResult(numbers, ops, mode, disabledOps = []) {
-    const shuffle = (arr) => arr.sort(() => Math.random() - 0.5);
+    // 🎲 สุ่มลำดับตัวเลข (Fisher–Yates)
+    const shuffle = (array) => {
+        const arr = [...array];
+        for (let i = arr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+        return arr;
+    };
+
     const nums = shuffle([...numbers]);
     const allowedOps = ops.filter((op) => !disabledOps.includes(op));
-    let expr = "", attempts = 0, result = 0;
+    const canPlaceRootAfter = ["+", "-", "×", "÷", "(", ""];
 
-    while ((!Number.isInteger(result) || result <= 0) && attempts < 300) {
-        attempts++;
+    // ✅ ใช้รูทเฉพาะเมื่อมีเลข 1,4,9
+    const hasPerfectSquare = nums.some((n) => [1, 4, 9].includes(n));
+    const baseAllowRoot = mode === "hard" && hasPerfectSquare && allowedOps.includes("√");
+
+    let expr = "";
+    let result = 0;
+    let attempts = 0;
+    let allowRoot = baseAllowRoot;
+
+    // 🔁 ฟังก์ชันสร้าง expression เดียว
+    function tryGenerateExpression() {
         expr = "";
+        result = 0;
+        let openParen = 0;
+        let prev = "";
+
         for (let i = 0; i < nums.length; i++) {
-            let n = nums[i];
-            if (mode === "hard" && allowedOps.includes("√") && Math.random() < 0.3)
-                n = `√${n}`;
-            expr += n;
-            if (i < nums.length - 1)
-                expr += allowedOps[Math.floor(Math.random() * allowedOps.length)];
+            // 🔹 เปิดวงเล็บสุ่ม
+            if (mode === "hard" && Math.random() < 0.25 && openParen === 0 && i < nums.length - 2) {
+                expr += "(";
+                openParen++;
+                prev = "(";
+            }
+
+            // 🔹 เพิ่มรูทเฉพาะจุดที่ถูกต้อง
+            if (
+                allowRoot &&
+                Math.random() < 0.5 &&
+                canPlaceRootAfter.includes(prev) &&
+                [1, 4, 9].includes(nums[i])
+            ) {
+                expr += "√";
+                prev = "√";
+            }
+
+            expr += nums[i];
+            prev = nums[i];
+
+            // 🔹 ปิดวงเล็บสุ่มบางครั้ง
+            if (mode === "hard" && openParen > 0 && Math.random() < 0.3 && i > 1) {
+                expr += ")";
+                openParen--;
+                prev = ")";
+            }
+
+            // 🔹 เพิ่ม operator (ห้ามซ้ำ)
+            if (i < nums.length - 1) {
+                let op = allowedOps[Math.floor(Math.random() * allowedOps.length)];
+                while (/[+\-×÷]/.test(prev) && /[+\-×÷]/.test(op)) {
+                    op = allowedOps[Math.floor(Math.random() * allowedOps.length)];
+                }
+                expr += op;
+                prev = op;
+            }
         }
+
+        // 🔹 ปิดวงเล็บค้าง
+        while (openParen > 0) {
+            expr += ")";
+            openParen--;
+        }
+
+        // ❌ ข้าม expression ผิดหลัก
+        if (/[\+\-×÷]{2,}/.test(expr)) return false;
+        if (/√√/.test(expr)) return false;
+        if (/\(\)/.test(expr)) return false;
+        if (/\d√/.test(expr)) return false;
+        if (/\)√/.test(expr)) return false;
+
         try {
             const clean = expr
                 .replace(/×/g, "*")
                 .replace(/÷/g, "/")
-                .replace(/√(\d+)/g, "Math.sqrt($1)");
+                .replace(/√(\d+|\([^()]+\))/g, "Math.sqrt($1)");
+
             result = eval(clean);
+
+            // 🧮 ตรวจรูท — ต้องถอดรากลงตัว
+            if (expr.includes("√")) {
+                const invalidRoot = /√(\d+)/g;
+                let match;
+                while ((match = invalidRoot.exec(expr)) !== null) {
+                    const n = parseInt(match[1]);
+                    if (Math.sqrt(n) % 1 !== 0) return false; // ❌ ถ้าไม่ใช่ perfect square
+                }
+            }
+
+            // ❌ reject ถ้าไม่ใช่ integer
+            if (!Number.isFinite(result) || !Number.isInteger(result) || result <= 0) {
+                return false;
+            }
         } catch {
-            result = 0;
+            return false;
+        }
+
+        return true;
+    }
+
+    // 🌀 พยายามสร้างโจทย์ที่ถูกหลัก
+    while ((!Number.isFinite(result) || !Number.isInteger(result) || result <= 0) && attempts < 800) {
+        attempts++;
+        if (tryGenerateExpression()) break;
+    }
+
+    // 🔁 ถ้ายังไม่ได้ → ปิดรูทแล้วลองใหม่
+    if (!Number.isInteger(result) || result <= 0) {
+        allowRoot = false;
+        for (let i = 0; i < 400; i++) {
+            if (tryGenerateExpression()) break;
         }
     }
+
+    // 🔒 fallback สุดท้าย (ไม่มีวันพัง)
+    if (!Number.isFinite(result) || !Number.isInteger(result) || result <= 0) {
+        expr = `${nums[0]}+${nums[1]}`;
+        result = nums[0] + nums[1];
+    }
+
     return { expr, result };
 }
 
 function generateProblem(mode) {
     const nums = Array.from({ length: 9 }, (_, i) => i + 1);
-    const selected = [];
+
+    let selected = [];
     while (selected.length < 5) {
         const idx = Math.floor(Math.random() * nums.length);
         selected.push(nums.splice(idx, 1)[0]);
@@ -62,6 +169,8 @@ function generateProblem(mode) {
 
     const baseOps = ["+", "-", "×", "÷"];
     const dis = [];
+
+    // 🔹 disable 2 operators ใน Genius mode (แบบสุ่ม)
     if (mode === "hard") {
         while (dis.length < 2) {
             const op = baseOps[Math.floor(Math.random() * baseOps.length)];
@@ -69,16 +178,38 @@ function generateProblem(mode) {
         }
     }
 
+    // 🔹 allowed ops
     const allOps = mode === "hard" ? baseOps.concat(["√", "(", ")"]) : baseOps;
-    const { expr, result } = createExpressionWithResult(selected, allOps, mode, dis);
+
+    let expr = "";
+    let result = 0;
+    let attempts = 0;
+
+    // 🔁 loop จนได้จำนวนเต็มจริง
+    while ((!Number.isFinite(result) || !Number.isInteger(result) || result <= 0) && attempts < 1000) {
+        attempts++;
+        const problem = createExpressionWithResult(selected, allOps, mode, dis);
+        expr = problem.expr;
+        result = problem.result;
+    }
+
+    // ✅ fallback ปลอดภัยสุดท้าย
+    if (!Number.isFinite(result) || !Number.isInteger(result) || result <= 0) {
+        expr = `${selected[0]}+${selected[1]}`;
+        result = selected[0] + selected[1];
+    }
+
     return {
         digits: selected,
         operators: allOps,
         disabledOps: dis,
-        target: result,
+        target: result, // ✅ ไม่ต้องปัด เพราะเป็น integer อยู่แล้ว
         expr,
         mode,
     };
+    const problem = generateProblem(mode);
+    console.log("🧩 Generated:", problem.expr, "=", problem.target);
+
 }
 
 
@@ -143,6 +274,8 @@ io.on("connection", (socket) => {
             currentProblem: generateProblem(mode), // ✅ สร้างโจทย์แรก
             answers: [], // ✅ เก็บคำตอบและเวลาในแต่ละรอบ
         };
+        roundTemp: {} // store { [nickname]: { correct: bool, timeMs: number } }
+
 
         io.to(mode).emit("preGameStart", {
             mode,
@@ -160,6 +293,9 @@ io.on("connection", (socket) => {
                 message: `🎮 Game started by ${nickname} (${shuffled.join(", ")})`,
                 round: 1,
             });
+            io.to(roomId).emit("gameStart", problem);
+            console.log("🚀 Sent expr to client:", problem.expr);
+
 
             // ✅   คำนวนคะแนนตามคนตอบไวสุด
             const startTime = Date.now();
@@ -275,6 +411,13 @@ function resumeGameHandler(mode) {
                     if (!room.scores[p]) room.scores[p] = 0;
                 });
                 room.scores[winner.player] += 1;
+                // 🏆 Update personal best if this is higher
+                const nickname = winner.player;
+                const newScore = room.scores[nickname];
+                if (!personalBests[nickname] || newScore > personalBests[nickname]) {
+                    personalBests[nickname] = newScore;
+                    console.log(`🏅 New personal best for ${nickname}: ${newScore}`);
+                }
 
                 io.to(data.mode).emit("roundResult", {
                     winner: winner.player,
@@ -292,20 +435,7 @@ function resumeGameHandler(mode) {
 
             // ✅ เตรียมรอบใหม่
             room.answers = [];
-            room.rounds += 1;
-            room.currentProblem = generateProblem(data.mode);
-
-            setTimeout(() => {
-                io.to(data.mode).emit("newRound", {
-                    round: room.rounds,
-                    ...room.currentProblem,
-                });
-
-
-                const startTime = Date.now();
-                room.startTime = startTime;
-                io.to(data.mode).emit("syncTimer", { mode: data.mode, startTime });
-            }, 3000);
+            
         }
     });
 
@@ -377,6 +507,21 @@ function resumeGameHandler(mode) {
         player.isOnline = false;
         updatePlayerList();
     });
+    // 🎭 Reaction event (simple emoji reactions between players)
+    socket.on("reaction", (data) => {
+        const { mode, emoji, nickname } = data;
+        console.log(`🎭 ${nickname} reacted with ${emoji} in mode ${mode}`);
+        io.to(mode).emit("reaction", { emoji, from: nickname });
+    });
+
+    // 🔍 When a client asks for their personal best
+    socket.on("getPersonalBest", (data) => {
+        const { nickname } = data;
+        const best = personalBests[nickname] || 0;
+        socket.emit("personalBest", { nickname, best });
+    });
+
+
 });
 
 /* 🧭 UPDATE PLAYER LIST --------------------------------------------- */
