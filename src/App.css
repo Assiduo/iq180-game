@@ -435,6 +435,7 @@ body {
   box-shadow: 0 0 20px rgba(0,0,0,0.4);
   transition: all 0.3s;
   font-size: 22px;
+  z-index: 1100; 
 }
 .back-btn:hover {
   transform: scale(1.1);

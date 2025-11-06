@@ -30,7 +30,7 @@ import timeoutSoundFile from "./sounds/timeout.mp3";
 import bgmFile from "./sounds/bgm.mp3";
 
 import { io } from "socket.io-client";
-const socket = io("http://192.168.1.178:4000");
+const socket = io("http://10.203.230.163:4000");
 //ถ้าเปลี่ยน router แม้ใช้ wifi ชื่อเดียวกัน ก็ต้องใส่ ip ใหม่
 // เข้า Terminal เครื่อง แล้วพิมพ์:
 // "ipconfig" (Window)
@@ -53,7 +53,7 @@ export default function App() {
       target: "Target",
       timeLeft: "Time Left",
       score: "Score",
-      delete: "Delete",
+      delete: "Clear",
       submit: "Submit",
       correct: "✅ Correct!",
       wrong: "❌ Wrong!",
@@ -387,14 +387,6 @@ const checkAnswer = () => {
     const result = eval(clean);
     const correct = Number.isFinite(result) && Math.abs(result - target) < 1e-9;
 
-    if (correct) {
-      playSound("correct");
-      setScore((s) => s + 1);
-      setResultPopup("correct");
-    } else {
-      playSound("wrong");
-      setResultPopup("wrong");
-    }
 
     // ✅ บันทึกลงประวัติ
     setHistory((h) => [
@@ -828,26 +820,51 @@ useEffect(() => {
   <button
     className="back-btn"
     onClick={() => {
+
       playSound("click");
 
       if (page === "game") {
-        stopTimer();
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+        setRunning(false);
+        setBaseTime(null); // optional, but keeps the global timer logic quiet // make sure this clears any intervals/timeouts
 
-        // ✅ ใช้ mode จาก gameState ถ้ามี (กัน state ค้าง)
         const activeMode = gameState?.mode || mode;
 
-        socket.emit("playerLeftGame", {
-          nickname,
-          mode: activeMode,
-        });
+        // tell server you left the game room
+        socket.emit("playerLeftGame", { nickname, mode: activeMode });
 
+        // 🚫 stop reacting to in-game events (prevents snap-back to "game")
+        socket.off("gameStart");
+        socket.off("yourTurn");
+        socket.off("turnSwitch");
+        socket.off("newRound");
+        socket.off("syncTimer");
+        socket.off("answerResult");
+
+
+        // 🔹 Reset gameplay states
         setRunning(false);
         setIsMyTurn(false);
-        setPage("mode"); // กลับไปหน้าเลือกโหมด
-      } 
+        setExpression("");
+        setTarget(null);
+        setDigits([]);
+        setOperators([]);
+        setDisabledOps([]);
+        setResultPopup(null);
+        setSolution(null);
+
+        // go to mode chooser
+        setPage("mode");
+      }
+
       else if (page === "waiting" || page === "mode") {
         socket.emit("leaveLobby", nickname);
         socket.disconnect();
+        socket.connect(); // reconnects, gets new socket.id
+        socket.emit("setNickname", nickname);
         setPage("login");
       } 
       else {
@@ -1191,7 +1208,7 @@ useEffect(() => {
         className="equal-btn glass-btn"
         onClick={() => {
           playSound("click");
-          setExpression((p) => p.slice(0, -1));
+          setExpression(() => "");
           setLastWasNumber(false);
           setLastWasSqrt(false);
         }}

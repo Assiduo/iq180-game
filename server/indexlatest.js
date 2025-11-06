@@ -140,6 +140,8 @@ io.on("connection", (socket) => {
             currentProblem: generateProblem(mode), // ✅ สร้างโจทย์แรก
             answers: [], // ✅ เก็บคำตอบและเวลาในแต่ละรอบ
         };
+        roundTemp: {} // store { [nickname]: { correct: bool, timeMs: number } }
+
 
         io.to(mode).emit("preGameStart", {
             mode,
@@ -230,12 +232,19 @@ io.on("connection", (socket) => {
             round: room.rounds,
         });
 
+        // 🎯 tell the next player to actually start playing
+        const nextSocket = findSocketByNickname(nextTurn);
+        if (nextSocket) {
+            io.to(nextSocket).emit("yourTurn", { mode });
+        }
+
         // 🕒 ให้ host sync timer ใหม่ (แค่ครั้งเดียวต่อรอบ)
         const hostName = room.turnOrder[0];
         const hostSocket = findSocketByNickname(hostName);
         if (hostSocket) {
             const startTime = Date.now();
             io.to(mode).emit("syncTimer", { mode, startTime });
+            room.startTime = startTime;
             console.log(`🕒 Timer synced by host (${hostName}) for mode ${mode}`);
         }
 
@@ -296,20 +305,7 @@ io.on("connection", (socket) => {
 
             // ✅ เตรียมรอบใหม่
             room.answers = [];
-            room.rounds += 1;
-            room.currentProblem = generateProblem(data.mode);
-
-            setTimeout(() => {
-                io.to(data.mode).emit("newRound", {
-                    round: room.rounds,
-                    ...room.currentProblem,
-                });
-
-
-                const startTime = Date.now();
-                room.startTime = startTime;
-                io.to(data.mode).emit("syncTimer", { mode: data.mode, startTime });
-            }, 3000);
+            
         }
     });
 
