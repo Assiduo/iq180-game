@@ -30,7 +30,7 @@ import timeoutSoundFile from "./sounds/timeout.mp3";
 import bgmFile from "./sounds/bgm.mp3";
 
 import { io } from "socket.io-client";
-const socket = io("http://10.203.130.139:4000");
+const socket = io("http://192.168.1.166:4000");
 //ถ้าเปลี่ยน router แม้ใช้ wifi ชื่อเดียวกัน ก็ต้องใส่ ip ใหม่
 // เข้า Terminal เครื่อง แล้วพิมพ์:
 // "ipconfig" (Window)
@@ -615,6 +615,8 @@ useEffect(() => {
     setDisabledOps(data.disabledOps || []);
     setTarget(data.target || 0);
     setMode(data.mode || "easy");
+    setSolutionExpr(data.expr || "No valid solution from server"); // ✅ เก็บสมการที่ server ส่งมา
+
       // ✅ อัปเดตค่าโจทย์ล่าสุดสำหรับ timeout
     problemRef.current = {
       digits: data.digits || [],
@@ -672,6 +674,8 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
     setExpression("");
     setLastWasNumber(false);
     setResultPopup(null);
+    setSolutionExpr(data.expr || "No valid solution from server");
+
   
     // ✅ sync โจทย์ล่าสุด
     problemRef.current = {
@@ -1288,27 +1292,65 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
       })}
     </div>
 
-    {/* OPERATORS */}
-    <div className="ops-grid">
-      {operators.map((op) => (
-        <button
-          key={op}
-          disabled={disabledOps.includes(op) || !lastWasNumber}
-          className={`op-btn ${
-            disabledOps.includes(op) ? "disabled" : ""
-          }`}
-          onClick={() => {
-            if (!disabledOps.includes(op) && lastWasNumber) {
-              playSound("click");
-              setExpression((p) => p + op);
-              setLastWasNumber(false);
-            }
-          }}
-        >
-          {op}
-        </button>
-      ))}
-    </div>
+{/* OPERATORS */}
+<div className="ops-grid">
+  {operators.map((op) => {
+    const lastChar = expression.slice(-1);
+
+    // ✅ นับจำนวนวงเล็บเปิด–ปิดในสมการปัจจุบัน
+    const openCount = (expression.match(/\(/g) || []).length;
+    const closeCount = (expression.match(/\)/g) || []).length;
+    const canCloseParen = openCount > closeCount; // ต้องมีวงเล็บเปิดค้างไว้ก่อนถึงจะปิดได้
+
+    // ✅ ตรวจ logic ของแต่ละปุ่ม
+    const canPressRoot =
+      lastChar === "" || ["+", "-", "×", "÷", "("].includes(lastChar); // √ ต่อหลัง operator หรือ (
+    const canPressOpenParen =
+      lastChar === "" || ["+", "-", "×", "÷", "("].includes(lastChar); // ( ต่อหลัง operator หรือ (
+    const canPressCloseParen =
+      lastChar !== "" && /[\d)]$/.test(lastChar) && canCloseParen; // ) ต่อหลังเลขหรือ ) และต้องมี ( เหลืออยู่
+    const canPressOperator =
+      lastChar !== "" && !["+", "-", "×", "÷", "("].includes(lastChar); // ห้าม operator ซ้ำ
+
+    // ✅ เงื่อนไข disable (logic)
+    let logicDisabled = false;
+    if (op === "√" && !canPressRoot) logicDisabled = true;
+    if (op === "(" && !canPressOpenParen) logicDisabled = true;
+    if (op === ")" && !canPressCloseParen) logicDisabled = true;
+    if (["+", "-", "×", "÷"].includes(op) && !canPressOperator) logicDisabled = true;
+
+    // ✅ เงื่อนไข disable จาก server (ล็อกเครื่องหมาย)
+    const lockedDisabled = disabledOps.includes(op);
+
+    // 🔒 รวมผลสุดท้าย
+    const isDisabled = logicDisabled || lockedDisabled;
+    const className = lockedDisabled ? "op-btn disabled" : "op-btn";
+
+    return (
+      <button
+        key={op}
+        disabled={isDisabled}
+        className={className}
+        onClick={() => {
+          if (isDisabled) return; // ไม่ให้กดถ้า logic หรือ locked
+          playSound("click");
+
+          setExpression((prev) => prev + op);
+
+          // 🎯 อัปเดต state
+          if (["+", "-", "×", "÷", "(", "√"].includes(op)) {
+            setLastWasNumber(false);
+          } else if (op === ")") {
+            setLastWasNumber(true);
+          }
+        }}
+      >
+        {op}
+      </button>
+    );
+  })}
+</div>
+
 
     {/* EXPRESSION BOX */}
     <input
