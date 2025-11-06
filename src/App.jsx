@@ -1,12 +1,8 @@
 // src/App.jsx
 /* =============================================================
- 🧩 IQ180 React App (Production-ready Clean Code)
----------------------------------------------------------------
- This file includes all logic for:
- - Game state and timer system
- - Multiplayer socket events
- - Sound and UI management
- - Comprehensive comments for each major section (English)
+ 🧩 IQ180 React App (Blended & Patched)
+ - Single-file client with robust timer sync, submit lock,
+   safe socket listener lifecycle, and consistent game logic.
 =============================================================*/
 
 import React, { useEffect, useRef, useState } from "react";
@@ -32,13 +28,13 @@ import bgmFile from "./sounds/bgm.mp3";
 
 import { io } from "socket.io-client";
 
-/* ---------- Config ---------- */
+/* ====== CONFIG ====== */
+// Replace with your server IP if needed:
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:4000";
 const socket = io(SERVER_URL, { autoConnect: true, transports: ["websocket", "polling"] });
 
-/* --------------------------
-   Helper local generator/solver
-   -------------------------- */
+
+/* ====== Helpers: generate / solve ====== */
 const generateProblemLocal = (m = "easy") => {
   const nums = [];
   while (nums.length < 5) nums.push(Math.floor(Math.random() * 9) + 1);
@@ -49,6 +45,7 @@ const generateProblemLocal = (m = "easy") => {
   return { digits: nums, operators: ops, disabledOps: [], target: targetVal, mode: m };
 };
 
+// brute force finder (returns expression using × and ÷)
 const findSolutionBrute = (digitsArr = [], tgt = 0, disabled = []) => {
   if (!Array.isArray(digitsArr) || digitsArr.length === 0) return null;
   const ops = ["+", "-", "*", "/"];
@@ -77,9 +74,9 @@ const findSolutionBrute = (digitsArr = [], tgt = 0, disabled = []) => {
   return null;
 };
 
-/* ---------- Component ---------- */
+/* ====== Component ====== */
 export default function App() {
-  /* ---------- UI configs ---------- */
+  /* ---------------- UI / i18n / theme ---------------- */
   const [lang, setLang] = useState("en");
   const texts = {
     en: {
@@ -156,11 +153,10 @@ export default function App() {
       delete: "删除",
       submit: "提交",
       correct: "✅ 正确!",
-      late: "⏳ 太迟了!",
       wrong: "❌ 错误!",
       timeout: "⏰ 时间到!",
       playAgain: "再玩一次",
-      exit: "退出游戏",
+      exit: "退出",
       back: "返回",
       stats: "统计结果",
       history: "历史记录",
@@ -188,11 +184,23 @@ export default function App() {
       accent: "#ff00a6",
       text: "#ffe6ff",
     },
+    auroraEmerald: {
+      name: "Aurora Emerald",
+      background: "linear-gradient(135deg, #003333, #006644, #001122)",
+      accent: "#00ffcc",
+      text: "#eafff4",
+    },
+    crimsonInferno: {
+      name: "Crimson Inferno",
+      background: "linear-gradient(135deg, #2b0000, #660000, #330000)",
+      accent: "#ff4444",
+      text: "#ffe5e5",
+    },
   };
   const [theme, setTheme] = useState("galaxyBlue");
   const [dropdownOpen, setDropdownOpen] = useState(null);
 
-  /* ---------- Sounds (refs so they persist) ---------- */
+  /* ---------------- Sounds (stable refs) ---------------- */
   const clickRef = useRef(null);
   const correctRef = useRef(null);
   const wrongRef = useRef(null);
@@ -208,11 +216,10 @@ export default function App() {
     timeoutRef.current = new Howl({ src: [timeoutSoundFile], volume: 0.6 });
     bgmRef.current = new Howl({ src: [bgmFile], loop: true, volume });
 
-    if (!muted) bgmRef.current.play();
-
-    return () => {
-      bgmRef.current?.stop();
-    };
+    if (!muted) {
+      try { bgmRef.current.play(); } catch (e) {}
+    }
+    return () => { bgmRef.current?.stop(); };
     // run once
   }, []); // eslint-disable-line
 
@@ -231,16 +238,9 @@ export default function App() {
     if (type === "timeout") timeoutRef.current?.play();
   };
 
-  const playSoundInternal = (type) => {
-    try {
-      playSound(type);
-    } catch (err) {
-      // ignore sound errors
-      // console.warn("sound error", err);
-    }
-  };
+  const playSoundInternal = (t) => { try { playSound(t); } catch (e) {} };
 
-  /* ---------- App state ---------- */
+  /* ---------------- App state ---------------- */
   const [page, setPage] = useState("login");
   const [nickname, setNickname] = useState("");
   const [mode, setMode] = useState("easy");
@@ -258,7 +258,6 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [lastWasNumber, setLastWasNumber] = useState(false);
 
-  /* Multiplayer & UI state */
   const [playerList, setPlayerList] = useState([]);
   const [waitingPlayers, setWaitingPlayers] = useState([]);
   const [canStart, setCanStart] = useState(false);
@@ -271,50 +270,35 @@ export default function App() {
 
   const [autoResumeCount, setAutoResumeCount] = useState(null);
 
-  /* Leaderboard & scores */
   const [leaderboard, setLeaderboard] = useState([]);
   const [scores, setScores] = useState({});
   const [personalBest, setPersonalBest] = useState(0);
   const [reactionPopup, setReactionPopup] = useState(null);
 
-  /* Timer */
-  const [baseTime, setBaseTime] = useState(null);
+  /* ---------------- Timer ---------------- */
+  const [baseTime, setBaseTime] = useState(null); // ms timestamp from server/host
   const [timeLeft, setTimeLeft] = useState(60);
   const [running, setRunning] = useState(false);
   const timerRef = useRef(null);
+  const roundTimeRef = useRef(60);
 
   const problemRef = useRef({ digits: [], target: 0, disabledOps: [] });
+  const submissionLockRef = useRef(false);
 
-  /* -----------------------
-     Helper functions
-  ------------------------*/
-  const stopTimer = () => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    setRunning(false);
-    setBaseTime(null);
-  };
-
-  /* ---------- Socket bindings ---------- */
+  /* ---------------- Socket listeners (single attach) ---------------- */
   useEffect(() => {
     if (!socket) return;
 
     const onConnect = () => {
-      console.log("connected to", SERVER_URL);
-      if (nickname.trim()) socket.emit("setNickname", nickname);
-      // request leaderboard on connect
+      console.log("socket connected");
+      if (nickname && nickname.trim()) socket.emit("setNickname", nickname);
       socket.emit("getLeaderboard");
     };
 
     const onPlayerList = (list) => setPlayerList(Array.isArray(list) ? list : []);
-    const onWaitingList = (d) => {
-      if (d?.mode === mode) setWaitingPlayers(Array.isArray(d.players) ? d.players : []);
-    };
-    const onCanStart = (d) => {
-      if (d?.mode === mode) setCanStart(!!d.canStart);
-    };
+    const onWaitingList = (d) => { if (!d) return; if (!d.mode || d.mode === mode) setWaitingPlayers(Array.isArray(d.players) ? d.players : []); };
+    const onCanStart = (d) => { if (!d) return; if (d.mode === mode) setCanStart(!!d.canStart); };
+
     const onPreGameStart = (d) => {
       if (!d) return;
       setPreGameInfo({ mode: d.mode, starter: d.starter, players: d.players });
@@ -324,41 +308,70 @@ export default function App() {
       const t = setInterval(() => {
         counter -= 1;
         setCountdown(counter);
-        if (counter <= 0) {
-          clearInterval(t);
-          setShowCountdown(false);
-        }
+        if (counter <= 0) { clearInterval(t); setShowCountdown(false); }
       }, 1000);
     };
+
     const onGameStart = (d) => {
       if (!d) return;
+      const rt = d.roundTime ?? (d.mode === "hard" ? 30 : 60);
+      roundTimeRef.current = rt;
+
       setDigits(d.digits || []);
-      setOperators(d.operators || operators);
+      setOperators(d.operators || ["+", "-", "×", "÷"]);
       setDisabledOps(d.disabledOps || []);
       setTarget(d.target || 0);
       setMode(d.mode || "easy");
-      problemRef.current = {
-        digits: d.digits || [],
-        target: d.target || 0,
-        disabledOps: d.disabledOps || [],
-      };
-      setScores(Object.fromEntries((Array.isArray(d.players) ? d.players : []).map((p) => [p, 0])));
-      // store minimal game state
-      setGameState({ turnOrder: d.turnOrder || d.players || [], currentTurn: d.currentTurn || null, mode: d.mode || mode, host: d.host });
-      setIsMyTurn(d.currentTurn === nickname);
+      problemRef.current = { digits: d.digits || [], target: d.target || 0, disabledOps: d.disabledOps || [] };
+
+      const listPlayers = Array.isArray(d.players) && d.players.length ? d.players : (Array.isArray(d.turnOrder) ? d.turnOrder : []);
+      const uniquePlayers = Array.from(new Set([...listPlayers, nickname].filter(Boolean)));
+      setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
+
+      setGameState({
+        turnOrder: d.turnOrder || d.players || [],
+        currentTurn: d.currentTurn || null,
+        mode: d.mode || mode,
+        host: d.host,
+      });
+
+      const amTurn = d.currentTurn === nickname;
+      setIsMyTurn(amTurn);
       setPage("game");
       setExpression("");
       setLastWasNumber(false);
       setResultPopup(null);
       setSolutionExpr("");
       setScore(0);
-      setRounds(1);
-      setTimeLeft(d.mode === "hard" ? 30 : 60);
-      setRunning(d.currentTurn === nickname);
+      setRounds(d.round ?? 1);
+
+      if (d.startTime) {
+        setBaseTime(d.startTime);
+        setRunning(true);
+        const elapsed = Math.floor((Date.now() - d.startTime) / 1000);
+        setTimeLeft(Math.max(rt - elapsed, 0));
+      } else if (amTurn) {
+        const now = Date.now();
+        setBaseTime(now);
+        setRunning(true);
+        setTimeLeft(rt);
+        if (d.host === nickname) {
+          socket.emit("syncTimer", { startTime: now, roundTime: rt, mode: d.mode });
+        }
+      } else {
+        setRunning(false);
+        setBaseTime(null);
+        setTimeLeft(rt);
+      }
     };
+
     const onNewRound = (d) => {
       if (!d) return;
+      const rt = d.roundTime ?? roundTimeRef.current;
+      roundTimeRef.current = rt;
+
       setDigits(d.digits || []);
+      setOperators(d.operators || ["+", "-", "×", "÷"]);
       setDisabledOps(d.disabledOps || []);
       setTarget(d.target || 0);
       if (d.round !== undefined) setRounds(d.round);
@@ -366,60 +379,116 @@ export default function App() {
       problemRef.current = { digits: d.digits || [], target: d.target || 0, disabledOps: d.disabledOps || [] };
       setSolutionExpr("");
       setResultPopup(null);
+
+      if (d.startTime) {
+        setBaseTime(d.startTime);
+        setRunning(true);
+        const elapsed = Math.floor((Date.now() - d.startTime) / 1000);
+        setTimeLeft(Math.max(rt - elapsed, 0));
+      } else {
+        setRunning(false);
+        setBaseTime(null);
+        setTimeLeft(rt);
+      }
     };
+
     const onTurnSwitch = (d) => {
       if (!d) return;
-      setIsMyTurn(d.nextTurn === nickname);
+      setGameState((prev) => ({ ...(prev || {}), currentTurn: d.nextTurn }));
       if (d.round !== undefined) setRounds(d.round);
-      setRunning(false);
+      setIsMyTurn(d.nextTurn === nickname);
+
+      if (d.startTime) {
+        roundTimeRef.current = d.roundTime ?? roundTimeRef.current;
+        setBaseTime(d.startTime);
+        setRunning(true);
+        const elapsed = Math.floor((Date.now() - d.startTime) / 1000);
+        setTimeLeft(Math.max(roundTimeRef.current - elapsed, 0));
+      } else {
+        // keep clients paused until sync or until their turn
+        setRunning(false);
+        setBaseTime(null);
+        // If it's us, start our local timer and ask for authoritative sync
+        if (d.nextTurn === nickname) {
+          const now = Date.now();
+          roundTimeRef.current = roundTimeRef.current ?? (mode === "hard" ? 30 : 60);
+          setBaseTime(now);
+          setRunning(true);
+          setTimeLeft(roundTimeRef.current);
+          socket.emit("requestSync", { mode });
+        }
+      }
     };
-    const onSyncTimer = ({ mode: syncMode, startTime }) => {
+
+    const onSyncTimer = ({ startTime, roundTime }) => {
       if (!startTime) return;
+      roundTimeRef.current = roundTime ?? roundTimeRef.current ?? (mode === "hard" ? 30 : 60);
       setBaseTime(startTime);
+      setRunning(true);
       const elapsed = Math.floor((Date.now() - startTime) / 1000);
-      const roundTime = syncMode === "hard" ? 30 : 60;
-      const remaining = Math.max(roundTime - elapsed, 0);
-      setTimeLeft(remaining);
-      setRunning(true);
+      setTimeLeft(Math.max(roundTimeRef.current - elapsed, 0));
     };
-    const onYourTurn = ({ mode: myMode }) => {
+
+    const onYourTurn = ({ mode: myMode, startTime, roundTime }) => {
       setIsMyTurn(true);
-      setRunning(true);
-      if (!problemRef.current || !problemRef.current.digits?.length) {
+      if (myMode) setMode(myMode);
+      roundTimeRef.current = roundTime ?? roundTimeRef.current ?? (myMode === "hard" ? 30 : 60);
+
+      // Use server-provided problem if it exists; otherwise generate local
+      if (!problemRef.current?.digits?.length) {
         const g = generateProblemLocal(myMode);
         setDigits(g.digits);
         setDisabledOps(g.disabledOps);
         setTarget(g.target);
         problemRef.current = { digits: g.digits, target: g.target, disabledOps: g.disabledOps };
       }
+
+      if (startTime) {
+        setBaseTime(startTime);
+        setRunning(true);
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        setTimeLeft(Math.max(roundTimeRef.current - elapsed, 0));
+      } else {
+        const now = Date.now();
+        setBaseTime(now);
+        setRunning(true);
+        setTimeLeft(roundTimeRef.current);
+        if ((gameState?.host || "") === nickname) {
+          socket.emit("syncTimer", { startTime: now, roundTime: roundTimeRef.current, mode: myMode });
+        }
+      }
+
       setExpression("");
       setLastWasNumber(false);
       setResultPopup(null);
     };
+
     const onAnswerResult = (d) => {
       if (!d) return;
       setScores((prev) => ({ ...(prev || {}), [d.nickname]: (prev?.[d.nickname] || 0) + (d.correct ? 1 : 0) }));
+      if (d.round !== undefined) setRounds(d.round);
     };
+
     const onGameOver = (d) => {
       setResultPopup("gameover");
       stopTimer();
       setRunning(false);
     };
+
     const onPlayerLeft = (d) => {
       if (!d) return;
       if (d.mode === mode) setWaitingPlayers((p) => p.filter((n) => n !== d.nickname));
     };
+
     const onReaction = (d) => {
       setReactionPopup(`${d.from}: ${d.emoji}`);
       setTimeout(() => setReactionPopup(null), 2000);
     };
-    const onPersonalBest = (d) => {
-      if (d?.best !== undefined) setPersonalBest(d.best);
-    };
-    const onLeaderboardUpdate = (d) => {
-      setLeaderboard(d || []);
-    };
 
+    const onPersonalBest = (d) => { if (d?.best !== undefined) setPersonalBest(d.best); };
+    const onLeaderboardUpdate = (d) => setLeaderboard(d || []);
+
+    // attach
     socket.on("connect", onConnect);
     socket.on("playerList", onPlayerList);
     socket.on("waitingList", onWaitingList);
@@ -437,6 +506,9 @@ export default function App() {
     socket.on("personalBest", onPersonalBest);
     socket.on("leaderboardUpdate", onLeaderboardUpdate);
 
+    if (!socket.connected) socket.connect();
+
+    // cleanup all attached in this effect
     return () => {
       socket.off("connect", onConnect);
       socket.off("playerList", onPlayerList);
@@ -456,39 +528,55 @@ export default function App() {
       socket.off("leaderboardUpdate", onLeaderboardUpdate);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nickname, mode]);
+  }, []); // attach once
 
-  /* ---------- Host-synced ticker ---------- */
+  /* ---------------- Host-synced ticker (runs when running/baseTime present) ---------------- */
   useEffect(() => {
-    if (!running || baseTime === null) return;
-    if (timerRef.current) clearInterval(timerRef.current);
+    if (!running || baseTime == null) {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+      return;
+    }
+
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
 
     const tick = () => {
-      const elapsed = Math.floor((Date.now() - baseTime) / 1000);
-      const roundTime = mode === "hard" ? 30 : 60;
+      const now = Date.now();
+      const elapsed = Math.floor((now - baseTime) / 1000);
+      const roundTime = roundTimeRef.current ?? (mode === "hard" ? 30 : 60);
       const remaining = Math.max(roundTime - elapsed, 0);
       setTimeLeft(remaining);
+
       if (remaining <= 0) {
-        stopTimer();
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+        setRunning(false);
         playSound("timeout");
         setResultPopup("timeout");
-        // compute solution
         try {
           const sol = findSolutionBrute(problemRef.current.digits || [], problemRef.current.target || 0, problemRef.current.disabledOps || []);
           setSolutionExpr(sol || "No valid solution found");
         } catch {
           setSolutionExpr("No valid solution found");
         }
-        // notify server
-        socket.emit("answerResult", { nickname, result: "timeout", correct: false, score, round: rounds + 1, mode });
-        // auto-resume after countdown
+
+        // inform server
+        socket.emit("answerResult", {
+          nickname,
+          result: "timeout",
+          correct: false,
+          score,
+          round: rounds + 1,
+          mode,
+          clientTime: Date.now(),
+        });
+
+        // auto resume countdown
         let count = 3;
         setAutoResumeCount(count);
-        const t = setInterval(() => {
+        const cInt = setInterval(() => {
           count -= 1;
           setAutoResumeCount(count);
           if (count <= 0) {
-            clearInterval(t);
+            clearInterval(cInt);
             setAutoResumeCount(null);
             setResultPopup(null);
             socket.emit("resumeGame", { mode });
@@ -498,17 +586,30 @@ export default function App() {
       }
     };
 
+    tick();
     timerRef.current = setInterval(tick, 1000);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); timerRef.current = null; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, baseTime, mode, nickname, rounds, score]);
 
-  /* ---------- Actions ---------- */
+    return () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
+  }, [running, baseTime, mode, rounds, score]);
+
+  /* ---------------- Actions ---------------- */
   const startGame = (playMode = mode) => {
     socket.emit("startGame", { mode: playMode, nickname });
   };
 
-  const checkAnswer = () => {
+  const stopTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setRunning(false);
+    setBaseTime(null);
+  };
+
+  const checkAnswer = async () => {
+    if (submissionLockRef.current) return;
+    submissionLockRef.current = true;
+
     try {
       const expr = expression.trim();
       if (!/\d/.test(expr)) { setResultPopup("invalid"); return; }
@@ -519,6 +620,9 @@ export default function App() {
       // eslint-disable-next-line no-eval
       const result = eval(clean);
       const correct = Number.isFinite(result) && Math.abs(result - target) < 1e-9;
+
+      // stop current timer to avoid duplicates
+      stopTimer();
 
       if (correct) {
         playSound("correct");
@@ -538,12 +642,16 @@ export default function App() {
 
       setHistory((h) => [...h, { round: rounds + 1, result: correct ? target : result, ok: correct }]);
 
-      if (socket && socket.connected) {
-        socket.emit("answerResult", { nickname, mode, result: correct ? target : result, correct, score: correct ? score + 1 : score, round: rounds + 1 });
-      }
+      socket.emit("answerResult", {
+        nickname,
+        mode,
+        result: correct ? target : result,
+        correct,
+        score: correct ? score + 1 : score,
+        round: rounds + 1,
+        clientTime: Date.now(),
+      });
 
-      // auto-resume
-      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
       let count = 3;
       setAutoResumeCount(count);
       const t = setInterval(() => {
@@ -563,6 +671,9 @@ export default function App() {
       console.error("checkAnswer error", err);
       setResultPopup("invalid");
       setSolutionExpr("No valid solution found");
+    } finally {
+      // small debounce before allowing next submit
+      setTimeout(() => { submissionLockRef.current = false; }, 1200);
     }
   };
 
@@ -585,14 +696,11 @@ export default function App() {
 
   const currentTheme = themes[theme] || themes.galaxyBlue;
   const fade = { initial: { opacity: 0, y: 20 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -20 } };
+  const isHost = (gameState?.host === nickname) || (Array.isArray(gameState?.turnOrder) && gameState.turnOrder[0] === nickname);
 
-  const isHost = gameState?.host === nickname || (gameState?.turnOrder?.[0] === nickname);
-
-  /* -------------------
-     MAIN UI
-  --------------------*/
+  /* ---------------- Render (UI) ---------------- */
   return (
-    <motion.div className="container" style={{ background: currentTheme.background, color: currentTheme.text }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.6 }}>
+    <motion.div className="container" style={{ background: currentTheme.background, color: currentTheme.text, minHeight: "100vh" }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.6 }}>
       {/* Top controls */}
       <div className="top-controls">
         <div className="lang-dropdown">
@@ -617,7 +725,6 @@ export default function App() {
           )}
         </div>
 
-        {/* Leaderboard button */}
         <div className="leaderboard-btn">
           <button className="control-btn" onClick={() => { playSoundInternal("click"); setPage("leaderboard"); socket.emit("getLeaderboard"); }} title="Leaderboard"><FaTrophy /></button>
         </div>
@@ -647,7 +754,6 @@ export default function App() {
         </button>
       )}
 
-      {/* Page content (login/mode/waiting/game/stats/leaderboard) */}
       <AnimatePresence mode="wait">
         {page === "login" && (
           <motion.div key="login" className="login-page" {...fade}>
@@ -687,7 +793,7 @@ export default function App() {
 
             {waitingPlayers.length > 1 && <button className="main-btn" onClick={() => socket.emit("startGame", { mode, nickname })}>🚀 {lang === "th" ? "เริ่มเกม" : lang === "zh" ? "开始游戏" : "Start Game"}</button>}
 
-            <button className="secondary-btn" onClick={() => { playSoundInternal("click"); socket.emit("leaveLobby", nickname); setPage("mode"); }}>← {lang === "th" ? "ออกจากห้อง" : lang === "zh" ? "离开房间" : "Leave Room"}</button>
+            <button className="secondary-btn" onClick={() => { playSoundInternal("click"); socket.emit("leaveGame", { nickname, mode }); setPage("mode"); }}>← {lang === "th" ? "ออกจากห้อง" : lang === "zh" ? "离开房间" : "Leave Room"}</button>
           </motion.div>
         )}
 
@@ -762,7 +868,7 @@ export default function App() {
 
                   <div className="action-row">
                     <button className="equal-btn glass-btn" onClick={() => { playSoundInternal("click"); setExpression((p) => p.slice(0, -1)); setLastWasNumber(false); }}>{T.delete}</button>
-                    <button className="equal-btn glass-btn" onClick={checkAnswer} disabled={digits.some((d) => !expression.includes(String(d)))}>{T.submit}</button>
+                    <button className="equal-btn glass-btn" onClick={checkAnswer} disabled={submissionLockRef.current || digits.some((d) => !expression.includes(String(d)))}>{T.submit}</button>
                     <button className="skip-btn glass-btn" onClick={() => { playSoundInternal("click"); socket.emit("skipTurn", { mode, nickname }); setIsMyTurn(false); setRunning(false); setTimeLeft(mode === "hard" ? 30 : 60); setExpression(""); }}>⏭️ Skip Turn</button>
                   </div>
                 </>
