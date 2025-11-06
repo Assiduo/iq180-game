@@ -1141,81 +1141,98 @@ useEffect(() => {
   <>
     {/* DIGITS */}
     <div className="digits-grid">
-      {digits.map((n) => {
-        const used = expression.includes(String(n));
-        return (
-          <button
-            key={n}
-            disabled={lastWasNumber || used}
-            className={`digit-btn ${used ? "used" : ""}`}
-            onClick={() => {
-              playSound("click");
-              if (!used && !lastWasNumber) {
-                setExpression((p) => p + n);
-                setLastWasNumber(true);
-              }
-            }}
-          >
-            {n}
-          </button>
-        );
-      })}
-    </div>
-
-    {/* OPERATORS */}
-    <div className="ops-grid">
-      {operators.map((op) => (
+    {digits.map((n) => {
+      const used = expression.includes(String(n));
+      return (
         <button
-          key={op}
-          disabled={disabledOps.includes(op) || !lastWasNumber}
-          className={`op-btn ${
-            disabledOps.includes(op) ? "disabled" : ""
-          }`}
+          key={n}
+          disabled={lastWasNumber || used}
+          className={`digit-btn ${used ? "used" : ""}`}
           onClick={() => {
-            if (!disabledOps.includes(op) && lastWasNumber) {
-              playSound("click");
-              setExpression((p) => p + op);
-              setLastWasNumber(false);
+            playSound("click");
+            if (!used && !lastWasNumber) {
+              setExpression((p) => p + n);
+              setLastWasNumber(true);
             }
           }}
         >
-          {op}
+          {n}
         </button>
-      ))}
-    </div>
+      );
+    })}
+  </div>
 
-    {/* EXPRESSION BOX */}
-    <input
-      className="expression-box"
-      readOnly
-      value={expression}
-      placeholder={T.buildEq}
-    />
-
-    {/* ACTION BUTTONS */}
-    <div className="action-row">
+  {/* OPERATORS */}
+  <div className="ops-grid">
+    {operators.map((op) => (
       <button
-        className="equal-btn glass-btn"
+        key={op}
+        disabled={disabledOps.includes(op) || !lastWasNumber}
+        className={`op-btn ${disabledOps.includes(op) ? "disabled" : ""}`}
         onClick={() => {
-          playSound("click");
-          setExpression((p) => p.slice(0, -1));
-          setLastWasNumber(false);
-          setLastWasSqrt(false);
+          if (!disabledOps.includes(op) && lastWasNumber) {
+            playSound("click");
+            setExpression((p) => p + op);
+            setLastWasNumber(false);
+          }
         }}
       >
-        {T.delete}
+        {op}
       </button>
-      <button
-        className="equal-btn glass-btn"
-        onClick={() => {
-          playSound("click");
-          checkAnswer();
-        }}
-        disabled={digits.some((d) => !expression.includes(String(d)))}
-      >
-        {T.submit}
-      </button>
-    </div>
+    ))}
+  </div>
+
+  {/* EXPRESSION BOX */}
+  <input
+    className="expression-box"
+    readOnly
+    value={expression}
+    placeholder={T.buildEq}
+  />
+
+  {/* ACTION BUTTONS */}
+  <div className="action-row">
+    {/* Delete */}
+    <button
+      className="equal-btn glass-btn"
+      onClick={() => {
+        playSound("click");
+        setExpression((p) => p.slice(0, -1));
+        setLastWasNumber(false);
+        setLastWasSqrt(false);
+      }}
+    >
+      {T.delete}
+    </button>
+
+    {/* Submit */}
+    <button
+      className="equal-btn glass-btn"
+      onClick={() => {
+        playSound("click");
+        checkAnswer();
+      }}
+      disabled={digits.some((d) => !expression.includes(String(d)))}
+    >
+      {T.submit}
+    </button>
+
+    {/* ⏭️ Skip Turn */}
+    <button
+      className="skip-btn glass-btn"
+      onClick={() => {
+        playSound("click");
+        socket.emit("skipTurn", { mode, nickname }); // 🔥 tell server we skipped
+        setIsMyTurn(false);
+        setRunning(false);
+        setTimeLeft(60);
+        setExpression("");
+        console.log("You skipped your turn");
+      }}
+    >
+      ⏭️ Skip Turn
+    </button>
+  </div>
   </>
 )}
 

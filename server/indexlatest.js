@@ -344,6 +344,50 @@ function resumeGameHandler(mode) {
         }
     });
 
+        /* ⏭️ Skip Turn (by player or auto) */
+    socket.on("skipTurn", ({ mode, nickname }) => {
+        const room = gameRooms[mode];
+        if (!room) return;
+
+        console.log(`⏭️ ${nickname} skipped their turn in ${mode}`);
+
+        // Find current player index
+        const currentIndex = room.turnOrder.indexOf(nickname);
+        if (currentIndex === -1) return;
+
+        // Mark that the player skipped
+        room.answers.push({
+            player: nickname,
+            correct: false,
+            skipped: true,
+            time: 0,
+        });
+
+        // Move to next player
+        room.currentTurnIndex = (currentIndex + 1) % room.turnOrder.length;
+        const nextTurn = room.turnOrder[room.currentTurnIndex];
+        room.currentTurn = nextTurn;
+
+        console.log(`🔁 Switching to next turn → ${nextTurn}`);
+
+        // Broadcast turn switch
+        io.to(mode).emit("turnSwitch", {
+            nextTurn,
+            currentTurnIndex: room.currentTurnIndex,
+            round: room.rounds,
+        });
+
+        // Give next player their turn
+        const nextSocket = findSocketByNickname(nextTurn);
+        if (nextSocket) io.to(nextSocket).emit("yourTurn", { mode });
+
+        // Reset & sync timer
+        const startTime = Date.now();
+        room.startTime = startTime;
+        io.to(mode).emit("syncTimer", { mode, startTime });
+        });
+
+
     /* 🟡 ออกจาก lobby */
     socket.on("leaveLobby", (nickname) => {
         if (!nickname) return;
