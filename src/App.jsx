@@ -1,4 +1,3 @@
-```jsx
 // src/App.jsx
 /* =============================================================
  🧩 IQ180 React App (Production-ready Clean Code)
@@ -837,4 +836,3 @@ export default function App() {
     </motion.div>
   );
 }
-```
