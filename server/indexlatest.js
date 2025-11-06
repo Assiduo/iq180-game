@@ -7,6 +7,10 @@ import cors from "cors";
 const app = express();
 app.use(cors());
 
+const gameTimers = {};
+const roundLock = { easy: false, hard: false };
+
+
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
@@ -128,8 +132,7 @@ io.on("connection", (socket) => {
         console.log(`🚀 ${nickname} started ${mode} game with:`, activePlayers);
 
         const shuffled = [...activePlayers].sort(() => Math.random() - 0.5);
-        const ROUND_TIME = 30;
-        let gameTimers = {};
+        const ROUND_TIME = 30000;
 
         gameRooms[mode] = {
             players: activePlayers,
@@ -168,83 +171,76 @@ io.on("connection", (socket) => {
                 io.to(mode).emit("syncTimer", { mode, startTime });
                 if (firstSocket) io.to(firstSocket).emit("yourTurn", { mode });
                 console.log(`🕒 Timer started at ${new Date(startTime).toLocaleTimeString()}`);
+
+                // ⏱️ Start auto-turn switch when time runs out
+            if (gameTimers[mode]) clearTimeout(gameTimers[mode]);
+            gameTimers[mode] = setTimeout(() => {
+            console.log(`⏰ Time up! Auto-switching turn in ${mode}`);
+            io.to(mode).emit("timeUp", { mode }); // optional event for UI
+            resumeGameHandler(mode);
+            }, ROUND_TIME);
             }, 500);
 
             waitingRooms[mode] = [];
         }, 3000);
     });
 
+function resumeGameHandler(mode) {
+  const room = gameRooms[mode];
+  if (!room) return;
+
+  if (roundLock[mode]) {
+    console.log(`⚠️ [LOCKED] Resume for ${mode} ignored (still processing round ${room.rounds})`);
+    return;
+  }
+  roundLock[mode] = true;
+
+  // 🧩 Switch player turn
+  room.currentTurnIndex = (room.currentTurnIndex + 1) % room.turnOrder.length;
+  const isNewRound = room.currentTurnIndex === 0;
+  if (isNewRound) room.rounds += 1;
+
+  room.currentTurn = room.turnOrder[room.currentTurnIndex];
+
+  console.log(`🔁 Switching turn to ${room.currentTurn} (Round ${room.rounds})`);
+  io.to(mode).emit("turnSwitch", {
+    nextTurn: room.currentTurn,
+    currentTurnIndex: room.currentTurnIndex,
+    round: room.rounds,
+  });
+
+  // 🎯 Notify next player
+  const nextSocket = findSocketByNickname(room.currentTurn);
+  if (nextSocket) io.to(nextSocket).emit("yourTurn", { mode });
+
+  // 🕒 Reset timer every turn
+  if (gameTimers[mode]) {
+    clearTimeout(gameTimers[mode]);
+  }
+
+  const startTime = Date.now();
+  room.startTime = startTime;
+  io.to(mode).emit("syncTimer", { mode, startTime });
+  console.log(`🕒 Timer reset for ${mode} — ${room.currentTurn}'s turn`);
+
+  // 🔁 Schedule next automatic turn switch after 30s
+  gameTimers[mode] = setTimeout(() => {
+    console.log(`⏰ Time up! Auto-switching turn in ${mode}`);
+    io.to(mode).emit("timeUp", { mode });
+    resumeGameHandler(mode);
+  }, 60000);
+
+  // 🔓 Unlock after short delay to avoid overlap
+  setTimeout(() => {
+    roundLock[mode] = false;
+    console.log(`🔓 [UNLOCK] ${mode} ready for next resume`);
+  }, 2000);
+}
+
 
     // 💾 เก็บสถานะ lock แยกต่อ mode
-    const roundLock = { easy: false, hard: false };
 
-    /* 🔁 สลับเทิร์น (resume game หรือ auto-next) */
-    socket.on("resumeGame", ({ mode }) => {
-        const room = gameRooms[mode];
-        if (!room) return;
-
-        // ✅ ป้องกัน resume ซ้ำ
-        if (roundLock[mode]) {
-            console.log(`⚠️ [LOCKED] Resume for ${mode} ignored (still processing round ${room.rounds})`);
-            return;
-        }
-        roundLock[mode] = true;
-
-        // ถ้าผู้เล่นไม่พอ → จบเกม
-        if (!room.players || room.players.length < 2) {
-            console.log(`💀 Game in ${mode} ended — not enough players`);
-            io.to(mode).emit("gameover", { reason: "not_enough_players" });
-            delete gameRooms[mode];
-            roundLock[mode] = false;
-            return;
-        }
-
-        // ✅ เพิ่มตัวนับเทิร์น
-        if (room.turnCount === undefined) room.turnCount = 0;
-        room.turnCount += 1;
-
-        // ✅ ครบรอบ → เพิ่มรอบใหม่
-        if (room.turnCount >= room.turnOrder.length) {
-            room.rounds += 1;
-            room.turnCount = 0;
-            console.log(`🏁 End of round ${room.rounds - 1} → starting round ${room.rounds}`);
-
-            // 🧩 สร้างโจทย์ใหม่จาก server
-            room.currentProblem = generateProblem(mode);
-            io.to(mode).emit("newRound", {
-                round: room.rounds,
-                ...room.currentProblem,
-            });
-        }
-
-        // 🔄 เปลี่ยนตาเล่น
-        room.currentTurnIndex = (room.currentTurnIndex + 1) % room.turnOrder.length;
-        const nextTurn = room.turnOrder[room.currentTurnIndex];
-        room.currentTurn = nextTurn;
-
-        console.log(`🔁 Switching turn to ${nextTurn} (Round ${room.rounds})`);
-
-        io.to(mode).emit("turnSwitch", {
-            nextTurn,
-            currentTurnIndex: room.currentTurnIndex,
-            round: room.rounds,
-        });
-
-        // 🕒 ให้ host sync timer ใหม่ (แค่ครั้งเดียวต่อรอบ)
-        const hostName = room.turnOrder[0];
-        const hostSocket = findSocketByNickname(hostName);
-        if (hostSocket) {
-            const startTime = Date.now();
-            io.to(mode).emit("syncTimer", { mode, startTime });
-            console.log(`🕒 Timer synced by host (${hostName}) for mode ${mode}`);
-        }
-
-        // ✅ ปลดล็อกหลัง 3 วินาที (กัน trigger ซ้ำจาก client อื่น)
-        setTimeout(() => {
-            roundLock[mode] = false;
-            console.log(`🔓 [UNLOCK] ${mode} ready for next resume`);
-        }, 3000);
-    });
+    socket.on("resumeGame", ({ mode }) => resumeGameHandler(mode));
 
     /* 🧮 sync ผลลัพธ์จาก client */
     socket.on("answerResult", (data) => {

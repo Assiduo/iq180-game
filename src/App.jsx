@@ -30,7 +30,7 @@ import timeoutSoundFile from "./sounds/timeout.mp3";
 import bgmFile from "./sounds/bgm.mp3";
 
 import { io } from "socket.io-client";
-const socket = io("http://192.168.1.178:4000");
+const socket = io("http://192.168.1.116:4000");
 //ถ้าเปลี่ยน router แม้ใช้ wifi ชื่อเดียวกัน ก็ต้องใส่ ip ใหม่
 // เข้า Terminal เครื่อง แล้วพิมพ์:
 // "ipconfig" (Window)
@@ -207,7 +207,7 @@ const [page, setPage] = useState("login");
 const [nickname, setNickname] = useState("");
 const [mode, setMode] = useState("easy");
 const [score, setScore] = useState(0);
-const [rounds, setRounds] = useState(0);
+const [rounds, setRounds] = useState(1);
 const [totalPlayers, setTotalPlayers] = useState(0); // ✅ เก็บจำนวนผู้เล่นในรอบ
 
 const [digits, setDigits] = useState([]);
@@ -232,6 +232,8 @@ const [countdown, setCountdown] = useState(0); // นับถอยหลัง
 const [showCountdown, setShowCountdown] = useState(false); // แสดง countdown popup หรือไม่
 const [gameState, setGameState] = useState({}); // สถานะเกมกลาง (turn, order, ฯลฯ)
 const [isMyTurn, setIsMyTurn] = useState(false); // ตอนนี้เป็นตาเราไหม
+const [currentTurn, setCurrentTurn] = useState(null);
+
 
 const [autoResumeCount, setAutoResumeCount] = useState(null);
 
@@ -248,7 +250,7 @@ socket.on("yourTurn", ({ mode }) => {
   setIsMyTurn(true);
 
   // 🧩 ตรวจว่าตานี้เป็นตาแรกหรือไม่ (ยังไม่มี rounds)
-  if (rounds === 0 && digits.length > 0) {
+  if (rounds === 1 && digits.length > 0) {
     console.log("🧩 First turn — using server-provided problem");
   } else {
     // ตาอื่นให้สร้างโจทย์ใหม่
@@ -267,7 +269,7 @@ socket.on("yourTurn", ({ mode }) => {
   setRunning(true);
 
   // ถ้าเราเป็น host → เริ่ม timer sync
-  if (gameState?.turnOrder?.[0] === nickname && rounds > 0) {
+  if (gameState?.turnOrder?.[0] === nickname && rounds > 1) {
     const startTime = Date.now();
     socket.emit("syncTimer", { mode, startTime });
     console.log("🕒 Host started global timer:", new Date(startTime).toLocaleTimeString());
@@ -288,22 +290,27 @@ socket.on("syncTimer", ({ mode, startTime }) => {
 });
 
 /* 🔁 เมื่อสลับเทิร์น ให้หยุด timer ชั่วคราว */
-socket.on("turnSwitch", (data) => {
-  console.log("🔁 Turn switched:", data);
-  setGameState((prev) => ({
-    ...prev,
-    currentTurn: data.nextTurn,
-  }));
-
-  // ✅ อัปเดตรอบจาก server
-  if (data.round !== undefined) {
-    setRounds(data.round);
-    console.log(`📦 Updated Round from server: ${data.round}`);
+// 🧠 Handle turn switch
+socket.on("turnSwitch", ({ nextTurn, currentTurnIndex, round }) => {
+  console.log("🔄 Turn switched to:", nextTurn, "Round:", round);
+  
+  // Update your app state or UI
+  setCurrentTurn(nextTurn);
+  setRounds(round);
+  
+  if (nextTurn === myNickname) {
+    showMessage("🎯 It's your turn!");
+  } else {
+    showMessage(`⌛ Waiting for ${nextTurn}...`);
   }
-
-  setIsMyTurn(data.nextTurn === nickname);
-  setRunning(false);
 });
+
+// 🎯 Handle your turn
+socket.on("yourTurn", ({ mode }) => {
+  console.log("🎯 It's your turn!");
+  enableInput(true); // enable answer buttons/input
+});
+
 
 
 /* 🕒 จับเวลาแบบ global ทุก client (รวมถึงคนรอ) */
@@ -586,7 +593,7 @@ useEffect(() => {
     setResultPopup(null);
     setSolution(null);
     setScore(0);
-    setRounds(0);
+    setRounds(1);
   
     console.log("🎯 Current turn:", data.currentTurn);
   });
