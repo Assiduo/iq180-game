@@ -30,7 +30,7 @@ import timeoutSoundFile from "./sounds/timeout.mp3";
 import bgmFile from "./sounds/bgm.mp3";
 
 import { io } from "socket.io-client";
-const socket = io("http://192.168.1.178:4000");
+const socket = io("http://192.168.1.166:4000");
 //ถ้าเปลี่ยน router แม้ใช้ wifi ชื่อเดียวกัน ก็ต้องใส่ ip ใหม่
 // เข้า Terminal เครื่อง แล้วพิมพ์:
 // "ipconfig" (Window)
@@ -171,6 +171,8 @@ export default function App() {
   const wrongSound = new Howl({ src: [wrongSoundFile], volume: 0.7 });
   const timeoutSound = new Howl({ src: [timeoutSoundFile], volume: 0.6 });
   const [bgm] = useState(() => new Howl({ src: [bgmFile], loop: true }));
+  // ✅ คะแนนของทุกผู้เล่นในเกม (ชื่อ → คะแนน)
+  const [scores, setScores] = useState({});
 
   useEffect(() => {
     bgm.volume(volume);
@@ -222,6 +224,9 @@ const [history, setHistory] = useState([]);
 const [lastWasNumber, setLastWasNumber] = useState(false);
 const [lastWasSqrt, setLastWasSqrt] = useState(false);
 const [solutionExpr, setSolutionExpr] = useState(""); // ✅ เก็บสมการเฉลยจริง
+const [endByName, setEndByName] = useState(null); 
+// 🧩 Keep latest problem refs for stable solution lookups
+const problemRef = useRef({ digits: [], target: 0, disabledOps: [] });
 
 
 /* 👥 Multiplayer & Room State */
@@ -319,8 +324,15 @@ useEffect(() => {
     if (remaining <= 0) {
       clearInterval(timerRef.current);
       setRunning(false);
-      setResultPopup("timeout");
       playSound("timeout");
+    
+      // ✅ ใช้โจทย์ล่าสุดจาก ref (กันค่า timeout ก่อนหน้าค้าง)
+      const { digits, target, disabledOps } = problemRef.current;
+      const sol = findSolution(digits, target, disabledOps);
+      setSolutionExpr(sol || "No valid solution found");
+    
+      // ✅ เปิด popup หลังตั้ง solutionExpr แล้ว
+      setResultPopup("timeout");
 
       // แจ้ง server ว่าหมดเวลา
       socket.emit("answerResult", {
@@ -342,8 +354,11 @@ useEffect(() => {
           clearInterval(countdown);
           setAutoResumeCount(null);
           setResultPopup(null);
-          socket.emit("resumeGame", { mode });
-          setIsMyTurn(false);
+          if (isMyTurn) {
+            socket.emit("resumeGame", { mode });
+            setIsMyTurn(false);
+          }
+          
         }
       }, 1000);
     }
@@ -358,51 +373,50 @@ const checkAnswer = () => {
   try {
     const expr = expression.trim();
 
-    // ❌ ถ้าไม่มีเลขเลย
+    // 🧩 Validation
     if (!/\d/.test(expr)) {
       setResultPopup("invalid");
       return;
     }
-
-    // ❌ ถ้าเริ่มต้นด้วย operator ที่ไม่ใช่ √ หรือ (
     if (/^[+\-×÷*/)]/.test(expr)) {
       setResultPopup("invalid");
       return;
     }
-
-    // ❌ ถ้าจบด้วย operator ที่ไม่ใช่ ) 
     if (/[+\-×÷*/(]$/.test(expr)) {
       setResultPopup("invalid");
       return;
     }
 
-    // ✅ แปลงสัญลักษณ์
+    // 🧮 Evaluate
     const clean = expr
       .replace(/×/g, "*")
       .replace(/÷/g, "/")
       .replace(/\^/g, "**")
       .replace(/√(\d+|\([^()]+\))/g, "Math.sqrt($1)");
 
-    // 🧮 คำนวณผลลัพธ์
     const result = eval(clean);
     const correct = Number.isFinite(result) && Math.abs(result - target) < 1e-9;
 
+    // ✅ แสดง popup + เสียง
     if (correct) {
       playSound("correct");
       setScore((s) => s + 1);
       setResultPopup("correct");
+  
+      setSolutionExpr(""); // ไม่ต้องแสดงเฉลยเพราะตอบถูก
     } else {
       playSound("wrong");
       setResultPopup("wrong");
+
+      // 🧠 หาเฉลยอัตโนมัติ
+      const sol = findSolution(digits, target, disabledOps);
+      setSolutionExpr(sol || "No valid solution found");
     }
 
-    // ✅ บันทึกลงประวัติ
-    setHistory((h) => [
-      ...h,
-      { round: rounds + 1, result, ok: correct },
-    ]);
+    // 🧾 เก็บประวัติ
+    setHistory((h) => [...h, { round: rounds + 1, result, ok: correct }]);
 
-    // ✅ ส่งข้อมูลขึ้น server
+    // 🔄 ส่งผลลัพธ์ไป server
     if (socket && socket.connected) {
       socket.emit("answerResult", {
         nickname,
@@ -414,39 +428,79 @@ const checkAnswer = () => {
       });
     }
 
-// 🧮 หลังตรวจคำตอบเสร็จ
-if (correct) {
-  playSound("correct");
-  setScore((s) => s + 1);
-  setResultPopup("correct");
-} else {
-  playSound("wrong");
-  setResultPopup("wrong");
-}
-
-// ✅ เริ่ม auto-resume countdown
-let count = 3;
-setAutoResumeCount(count);
-
-const timer = setInterval(() => {
-  count -= 1;
-  setAutoResumeCount(count);
-  if (count <= 0) {
-    clearInterval(timer);
-    setAutoResumeCount(null);
-    setResultPopup(null);
-
-    // 🔁 แจ้ง server ว่าสลับเทิร์นไปคนต่อไป
-    socket.emit("resumeGame", { mode });
-    setIsMyTurn(false);
-  }
-}, 1000);
-
+    // ⏳ เริ่ม auto resume
+    let count = 3;
+    setAutoResumeCount(count);
+    const timer = setInterval(() => {
+      count -= 1;
+      setAutoResumeCount(count);
+      if (count <= 0) {
+        clearInterval(timer);
+        setAutoResumeCount(null);
+        setResultPopup(null);
+        if (isMyTurn) {
+          socket.emit("resumeGame", { mode });
+          setIsMyTurn(false);
+        }
+        
+      }
+    }, 1000);
   } catch (err) {
     console.error("❌ Expression error:", err);
     setResultPopup("invalid");
   }
 };
+// 🛑 STOP TIMER (safe)
+const stopTimer = () => {
+  if (timerRef.current) {
+    clearInterval(timerRef.current);
+    timerRef.current = null;
+  }
+};
+
+// 👑 HOST CHECK (คงไว้เสมอ เผื่อ JSX ใช้)
+const isHost = gameState?.turnOrder?.[0] === nickname;
+
+// 🧨 END GAME FOR ALL (ทุกคนเห็น Game Over popup)
+const endGameForAll = () => {
+  // กันกดซ้ำ/กันยิงซ้ำขณะอยู่ popup อยู่แล้ว
+  if (resultPopup === "gameover") return;
+
+  try {
+    playSound("click");
+  } catch {}
+
+  stopTimer();
+  setRunning(false);
+
+  // ให้เราเห็น popup ทันที
+  setResultPopup("gameover");
+
+  // แจ้ง server ให้ broadcast ไปทั้งห้อง (ถ้า server รองรับ)
+  if (socket && socket.connected) {
+    socket.emit("endGame", { mode, by: nickname, reason: "endedByPlayer" });
+  }
+};
+
+// 🚪 LEAVE GAME (เผื่อ JSX ที่ไหนยังเรียกอยู่ จะไม่พังหน้าดำ)
+// ทำให้พฤติกรรม "ออก" ก็เจอ popup เหมือนคนอื่น (ตามที่คุณต้องการ)
+const leaveGame = () => {
+  try {
+    playSound("click");
+  } catch {}
+
+  stopTimer();
+  setRunning(false);
+
+  // เห็น popup game over แบบเดียวกัน
+  setResultPopup("gameover");
+
+  // แจ้ง server ว่าเราออก (server อาจจบเกมถ้าเหลือคนน้อย)
+  if (socket && socket.connected) {
+    socket.emit("playerLeftGame", { nickname, mode });
+  }
+};
+
 
   /* 🧠 หาวิธีเฉลยที่ถูกต้องตามเครื่องหมายที่เปิดใช้ */
   const findSolution = (digits, target, disabledOps = []) => {
@@ -554,13 +608,32 @@ useEffect(() => {
 
   socket.on("gameStart", (data) => {
     console.log("🚀 Game started from server:", data);
-  
+
+    
     setDigits(data.digits || []);
     setOperators(data.operators || []);
     setDisabledOps(data.disabledOps || []);
     setTarget(data.target || 0);
     setMode(data.mode || "easy");
-  
+    setSolutionExpr(data.expr || "No valid solution from server"); // ✅ เก็บสมการที่ server ส่งมา
+
+      // ✅ อัปเดตค่าโจทย์ล่าสุดสำหรับ timeout
+    problemRef.current = {
+      digits: data.digits || [],
+      target: data.target || 0,
+      disabledOps: data.disabledOps || [],
+    };
+    setSolutionExpr(""); // กัน solution เดิมค้าง
+    // ✅ สร้าง scoreboard ให้ครบทุกคนตั้งแต่เริ่ม
+const list =
+Array.isArray(data.players) && data.players.length > 0
+  ? data.players
+  : (Array.isArray(data.turnOrder) ? data.turnOrder : []);
+const uniquePlayers = Array.from(new Set([...list, nickname]));
+setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
+
+
+
     // ตั้งสถานะเกม
     setGameState(data);
     const myTurn = data.currentTurn === nickname;
@@ -572,7 +645,7 @@ useEffect(() => {
     // ถ้าเป็นคนเล่น → เปิด timer
     if (myTurn) {
       setRunning(true);
-      setTimeLeft(data.mode === "hard" ? 30 : 60);
+      setTimeLeft(data.mode === "hard" ? 30 : 8);
     } else {
       // ถ้าเป็นคนรอ → หยุด timer (เพื่อไม่ให้เวลาวิ่งมั่ว)
       setRunning(false);
@@ -593,8 +666,6 @@ useEffect(() => {
   
   // 📦 รับโจทย์ใหม่จาก server
   socket.on("newRound", (data) => {
-    console.log("🧩 Received new round problem:", data);
-
     setDigits(data.digits);
     setOperators(data.operators);
     setDisabledOps(data.disabledOps);
@@ -603,7 +674,18 @@ useEffect(() => {
     setExpression("");
     setLastWasNumber(false);
     setResultPopup(null);
+    setSolutionExpr(data.expr || "No valid solution from server");
+
+  
+    // ✅ sync โจทย์ล่าสุด
+    problemRef.current = {
+      digits: data.digits,
+      target: data.target,
+      disabledOps: data.disabledOps,
+    };
+    setSolutionExpr("");
   });
+  
 
   
   // 🔁 สลับเทิร์นผู้เล่น
@@ -628,10 +710,12 @@ useEffect(() => {
   /* 💀 เมื่อเกมผู้เล่นเหลือน้อยเกินไป */
   socket.on("gameover", (data) => {
     console.log("💀 Game over:", data);
+    setEndByName(data?.by || null);   // ✅ เก็บชื่อผู้กดจาก server ถ้ามี
     setResultPopup("gameover");
     stopTimer();
     setRunning(false);
   });
+  
 
   // 🎯 เมื่อถึงตาเราเล่น (server ส่งสัญญาณ yourTurn)
   socket.on("yourTurn", ({ mode }) => {
@@ -644,6 +728,12 @@ useEffect(() => {
     setDisabledOps(gameData.disabledOps);
     setTarget(gameData.target);
     setMode(gameData.mode);
+
+    problemRef.current = {
+      digits: gameData.digits,
+      target: gameData.target,
+      disabledOps: gameData.disabledOps,
+    };
 
     // ✅ ตั้งค่า state สำหรับเริ่มเล่น
     setRunning(true);
@@ -674,17 +764,28 @@ useEffect(() => {
   // 🧮 ผลลัพธ์ของคำตอบ (sync จากผู้เล่นอื่น)
   socket.on("answerResult", (data) => {
     console.log("📩 Answer result:", data);
-
-    // ป้องกันไม่ให้ popup ซ้อนกับฝั่งตัวเอง
-    if (data.nickname === nickname) return;
-
-    // แค่โชว์ว่ามีคนเล่น (ไม่ต้องโชว์เฉลย)
-    if (data.correct) {
-      console.log(`✅ ${data.nickname} answered correctly!`);
-    } else {
-      console.log(`❌ ${data.nickname} answered wrong.`);
+  
+    // ✅ อัปเดต scoreboard จาก server สำหรับผู้เล่นคนที่ตอบ (รวมตัวเราเอง)
+    setScores((prev) => {
+      const next = { ...prev };
+      if (!(data.nickname in next)) next[data.nickname] = 0;
+      if (data.correct) next[data.nickname] += 1;
+      return next;
+    });
+  
+    // (ออปชัน) sync รอบจาก server
+    if (data.round !== undefined) setRounds(data.round);
+  
+    // ไม่ต้อง popup ซ้อน; แค่ log
+    if (data.nickname !== nickname) {
+      if (data.correct) {
+        console.log(`✅ ${data.nickname} answered correctly!`);
+      } else {
+        console.log(`❌ ${data.nickname} answered wrong.`);
+      }
     }
   });
+  
 
   // 🚪 เมื่อผู้เล่นออกจากห้องหรือ disconnect
   socket.on("playerLeft", (data) => {
@@ -1063,6 +1164,42 @@ useEffect(() => {
     {T.playerName}: <span>{nickname}</span>
   </h2>
 
+    {/* 🔘 Game controls */}
+    {/* 🔘 Game controls — bottom center */}
+    <div
+      style={{
+        position: "fixed",
+        left: "50%",
+        bottom: 16,
+        transform: "translateX(-50%)",
+        display: "flex",
+        gap: 12,
+        justifyContent: "center",
+        alignItems: "center",
+        flexWrap: "wrap",
+        zIndex: 20,              // ให้อยู่เหนือเนื้อหา แต่ไม่ทับ popup ถ้าคุณตั้ง popup เป็น zIndex สูงกว่า
+        padding: "8px 12px",
+        borderRadius: 12,
+        backdropFilter: "blur(6px)",
+      }}
+    >
+      <button className="glass-btn" onClick={leaveGame}>
+        <FaSignOutAlt /> {lang === "th" ? "จบเกม" : lang === "zh" ? "结束游戏" : "End Game"}
+      </button>
+
+      {/* จบเกมทั้งห้อง (โชว์เฉพาะโฮสต์) */}
+      {isHost && (
+        <button
+          className="glass-btn"
+          style={{ borderColor: "rgba(255,100,100,0.6)" }}
+          onClick={endGameForAll}
+        >
+          🛑 {lang === "th" ? "จบเกม" : lang === "zh" ? "结束游戏" : "End Game"}
+        </button>
+      )}
+    </div>
+
+
   {/* 🎯 สถานะการเล่น */}
   {isMyTurn ? (
     <>
@@ -1155,27 +1292,65 @@ useEffect(() => {
       })}
     </div>
 
-    {/* OPERATORS */}
-    <div className="ops-grid">
-      {operators.map((op) => (
-        <button
-          key={op}
-          disabled={disabledOps.includes(op) || !lastWasNumber}
-          className={`op-btn ${
-            disabledOps.includes(op) ? "disabled" : ""
-          }`}
-          onClick={() => {
-            if (!disabledOps.includes(op) && lastWasNumber) {
-              playSound("click");
-              setExpression((p) => p + op);
-              setLastWasNumber(false);
-            }
-          }}
-        >
-          {op}
-        </button>
-      ))}
-    </div>
+{/* OPERATORS */}
+<div className="ops-grid">
+  {operators.map((op) => {
+    const lastChar = expression.slice(-1);
+
+    // ✅ นับจำนวนวงเล็บเปิด–ปิดในสมการปัจจุบัน
+    const openCount = (expression.match(/\(/g) || []).length;
+    const closeCount = (expression.match(/\)/g) || []).length;
+    const canCloseParen = openCount > closeCount; // ต้องมีวงเล็บเปิดค้างไว้ก่อนถึงจะปิดได้
+
+    // ✅ ตรวจ logic ของแต่ละปุ่ม
+    const canPressRoot =
+      lastChar === "" || ["+", "-", "×", "÷", "("].includes(lastChar); // √ ต่อหลัง operator หรือ (
+    const canPressOpenParen =
+      lastChar === "" || ["+", "-", "×", "÷", "("].includes(lastChar); // ( ต่อหลัง operator หรือ (
+    const canPressCloseParen =
+      lastChar !== "" && /[\d)]$/.test(lastChar) && canCloseParen; // ) ต่อหลังเลขหรือ ) และต้องมี ( เหลืออยู่
+    const canPressOperator =
+      lastChar !== "" && !["+", "-", "×", "÷", "("].includes(lastChar); // ห้าม operator ซ้ำ
+
+    // ✅ เงื่อนไข disable (logic)
+    let logicDisabled = false;
+    if (op === "√" && !canPressRoot) logicDisabled = true;
+    if (op === "(" && !canPressOpenParen) logicDisabled = true;
+    if (op === ")" && !canPressCloseParen) logicDisabled = true;
+    if (["+", "-", "×", "÷"].includes(op) && !canPressOperator) logicDisabled = true;
+
+    // ✅ เงื่อนไข disable จาก server (ล็อกเครื่องหมาย)
+    const lockedDisabled = disabledOps.includes(op);
+
+    // 🔒 รวมผลสุดท้าย
+    const isDisabled = logicDisabled || lockedDisabled;
+    const className = lockedDisabled ? "op-btn disabled" : "op-btn";
+
+    return (
+      <button
+        key={op}
+        disabled={isDisabled}
+        className={className}
+        onClick={() => {
+          if (isDisabled) return; // ไม่ให้กดถ้า logic หรือ locked
+          playSound("click");
+
+          setExpression((prev) => prev + op);
+
+          // 🎯 อัปเดต state
+          if (["+", "-", "×", "÷", "(", "√"].includes(op)) {
+            setLastWasNumber(false);
+          } else if (op === ")") {
+            setLastWasNumber(true);
+          }
+        }}
+      >
+        {op}
+      </button>
+    );
+  })}
+</div>
+
 
     {/* EXPRESSION BOX */}
     <input
@@ -1224,7 +1399,16 @@ useEffect(() => {
     {resultPopup === "correct" && <h2>{T.correct}</h2>}
 
     {/* ❌ ผิด */}
-    {resultPopup === "wrong" && <h2>{T.wrong}</h2>}
+    {resultPopup === "wrong" && (
+  <>
+    <h2>{T.wrong}</h2>
+    <p className="solution-text">
+      💡 {T.solution}: <br />
+      <span className="solution-highlight">{solutionExpr}</span>
+    </p>
+  </>
+)}
+
 
     {/* ⏰ หมดเวลา */}
     {resultPopup === "timeout" && (
@@ -1240,13 +1424,20 @@ useEffect(() => {
     {/* 🚫 invalid */}
     {resultPopup === "invalid" && <h2>{T.invalidExpr}</h2>}
 
-    {/* 💀 Game Over */}
     {resultPopup === "gameover" && (
-      <>
-        <h2>💀 Game Over</h2>
-        <p className="solution-text">Not enough players to continue.</p>
-      </>
+  <>
+    <h2>💀 Game Over</h2>
+    {endByName && (
+      <p className="solution-text">
+        🛑 {lang === "th" ? "จบเกมโดย" : lang === "zh" ? "由以下玩家结束：" : "Ended by"}: 
+        <span className="solution-highlight"> {endByName}</span>
+      </p>
     )}
+    <p className="solution-text">Not enough players to continue.</p>
+    {/* ... ปุ่มเดิม Play Again / Exit ... */}
+  </>
+)}
+
 
     {/* 🕒 นับถอยหลังอยู่ใน popup เดิมเลย */}
     {autoResumeCount !== null && (
@@ -1318,48 +1509,105 @@ useEffect(() => {
       </button>
     </div>
   </motion.div>
+)}{page === "stats" && (
+  <motion.div key="stats" {...fade} className="stats-page">
+    <div className="stats-card">
+      <h2 className="stats-title">{T.stats}</h2>
+
+      {(() => {
+        // ✅ รายชื่อ + คะแนนจาก state (ถ้ามี)
+        const entries = Object.entries(scores ?? {});
+
+        // ✅ Fallback รายชื่อผู้เล่น หาก scores ยังว่าง
+        const turnOrder = Array.isArray(gameState?.turnOrder) ? gameState.turnOrder : [];
+        const waiters = Array.isArray(waitingPlayers) ? waitingPlayers : [];
+        const basePlayers = [...new Set([...turnOrder, ...waiters, nickname].filter(Boolean))];
+
+        // ✅ สร้าง rowsRaw เสมอ (ถ้าไม่มีคะแนน ให้เป็น 0)
+        const rowsRaw =
+          entries.length > 0
+            ? entries // [['A',1],['B',0], ...]
+            : basePlayers.map((name) => [name, 0]);
+
+        if (rowsRaw.length === 0) {
+          return (
+            <p style={{ textAlign: "center", marginTop: 12 }}>
+              {lang === "th" ? "ยังไม่มีผู้เล่น" : lang === "zh" ? "暂无玩家" : "No players yet"}
+            </p>
+          );
+        }
+
+        // ✅ เรียงคะแนน มาก→น้อย
+        const sorted = [...rowsRaw].sort((a, b) => b[1] - a[1]);
+        const [winName, winScore] = sorted[0];
+
+        return (
+          <>
+            {/* 🏆 Winner */}
+            <div className="winner-banner" style={{ margin: "8px 0 16px", textAlign: "center" }}>
+              <h3 style={{ margin: 0 }}>
+                🏆 {lang === "th" ? "ผู้ชนะ" : lang === "zh" ? "获胜者" : "Winner"}:{" "}
+                <span className="highlight">{winName}</span>
+              </h3>
+              <p style={{ marginTop: 6 }}>
+                {lang === "th" ? "คะแนน" : lang === "zh" ? "分数" : "Score"}:{" "}
+                <strong>{winScore}</strong>
+              </p>
+            </div>
+
+            {/* 📊 Scoreboard: ผู้เล่นทั้งหมด */}
+            <div className="scoreboard glass-card" style={{ padding: 16 }}>
+              <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: "0 8px" }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: "left" }}>
+                      {lang === "th" ? "ผู้เล่น" : lang === "zh" ? "玩家" : "Player"}
+                    </th>
+                    <th style={{ textAlign: "right" }}>
+                      {lang === "th" ? "คะแนน" : lang === "zh" ? "分数" : "Score"}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sorted.map(([name, sc]) => (
+                    <tr key={name}>
+                      <td>
+                        {name === nickname ? (
+                          <span className="you-label" style={{ marginRight: 6 }}>
+                            {lang === "th" ? "คุณ" : lang === "zh" ? "你" : "You"}
+                          </span>
+                        ) : null}
+                        {name}
+                        {name === winName && <span style={{ marginLeft: 8 }}>🏆</span>}
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <strong>{sc}</strong>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        );
+      })()}
+
+      {/* 🔙 Back */}
+      <div className="stats-actions" style={{ marginTop: 16 }}>
+        <button
+          className="main-btn"
+          onClick={() => {
+            playSound("click");
+            setPage("mode");
+          }}
+        >
+          <FaArrowLeft /> {T.back}
+        </button>
+      </div>
+    </div>
+  </motion.div>
 )}
 
-        {/* STATS PAGE ---------------------------------------------- */}
-        {page === "stats" && (
-          <motion.div key="stats" {...fade} className="stats-page">
-            <div className="stats-card">
-              <h2 className="stats-title">{T.stats}</h2>
-              <p className="player-summary">
-                {T.playerName}: <strong>{nickname}</strong>
-              </p>
-              <p>
-                {T.score}: <strong>{score}</strong>
-              </p>
-              <p>
-                {T.rounds}: <strong>{rounds}</strong>
-              </p>
-
-              <div className="history">
-                <h3>{T.history}</h3>
-                <ul>
-                  {history.map((h, i) => (
-                    <li key={i}>
-                      Round {h.round}: {h.ok ? "✅" : "❌"} ({h.result})
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="stats-actions">
-                <button
-                  className="main-btn"
-                  onClick={() => {
-                    playSound("click");
-                    setPage("mode");
-                  }}
-                >
-                  <FaArrowLeft /> {T.back}
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        )}
       </AnimatePresence>
 
 
