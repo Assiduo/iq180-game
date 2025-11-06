@@ -209,6 +209,9 @@ const [mode, setMode] = useState("easy");
 const [score, setScore] = useState(0);
 const [rounds, setRounds] = useState(0);
 const [totalPlayers, setTotalPlayers] = useState(0); // ✅ เก็บจำนวนผู้เล่นในรอบ
+const [showWelcomePopup, setShowWelcomePopup] = useState(false);
+const [hasConfirmedName, setHasConfirmedName] = useState(false);
+
 
 const [digits, setDigits] = useState([]);
 const [operators, setOperators] = useState([]);
@@ -502,6 +505,7 @@ useEffect(() => {
   // 🟢 เมื่อเชื่อมต่อสำเร็จ
   socket.on("connect", () => {
     console.log("🟢 Connected to server");
+    
     if (page === "mode" && nickname.trim()) {
       socket.emit("setNickname", nickname); // ✅ ออนไลน์เมื่อเข้า mode page
       console.log(`✅ ${nickname} marked as online`);
@@ -863,33 +867,107 @@ useEffect(() => {
       {/* ⚡ PAGE SWITCHER */}
       <AnimatePresence mode="wait">
         {/* LOGIN PAGE ------------------------------------------------ */}
-        {page === "login" && (
-          <motion.div key="login" className="login-page" {...fade}>
-            <div className="glass-card">
-              <h1 className="title">{T.title}</h1>
-              <p className="subtitle">{T.subtitle}</p>
-              <input
-                type="text"
-                placeholder={T.enterName}
-                value={nickname}
-                onChange={(e) => setNickname(e.target.value)}
-              />
-<button
-  className="main-btn"
-  onClick={() => {
-    if (nickname.trim()) {
-      playSound("click");
-      socket.emit("setNickname", nickname); // ✅ แจ้ง server ทันทีว่า player online แล้ว
-      setPage("mode");
-    }
-  }}
->
-  {T.start} <FaArrowRight />
-</button>
+{page === "login" && !showWelcomePopup && (
+  <motion.div key="login" className="login-page" {...fade}>
+    <div className="glass-card">
+      <h1 className="title">{T.title}</h1>
+      <p className="subtitle">{T.subtitle}</p>
+      <input
+        type="text"
+        placeholder={T.enterName}
+        value={nickname}
+        onChange={(e) => setNickname(e.target.value)}
+      />
+      <button
+        className="main-btn"
+        onClick={() => {
+          if (nickname.trim()) {
+            playSound("click");
+            socket.emit("setNickname", nickname); // notify server immediately
+            setShowWelcomePopup(true); // open popup
+          }
+        }}
+      >
+        {T.start} <FaArrowRight />
+      </button>
+    </div>
+  </motion.div>
+)}
 
-            </div>
-          </motion.div>
-        )}
+
+{showWelcomePopup && (
+  <motion.div
+    key="welcome-popup"
+    className="fixed inset-0 flex items-center justify-center z-50 bg-gradient-to-b from-[#1a2238]/95 to-[#0d1323]/95 backdrop-blur-md"
+    initial={{ opacity: 0, scale: 0.95, y: 20 }}
+    animate={{ opacity: 1, scale: 1, y: 0 }}
+    exit={{ opacity: 0, scale: 0.95, y: 20 }}
+    transition={{ duration: 0.3, ease: "easeOut" }}
+  >
+    <div className="max-w-xl w-[90%] rounded-3xl shadow-2xl p-10 border border-white/10 
+                    bg-gradient-to-b from-[#273c75]/90 to-[#192a56]/90 text-white backdrop-blur-md">
+      {/* Title */}
+      <h2 className="text-3xl font-bold text-center mb-2">
+        Welcome, <span className="text-[#8ec5fc]">{nickname || "player"}</span>!
+      </h2>
+      <p className="text-center text-gray-300 mb-8">
+        Welcome! Here’s how to play and a few tips before you start.
+      </p>
+      <br></br>
+
+      {/* How to Play */}
+      <div className="bg-white/10 rounded-2xl px-8 py-6 mb-6 backdrop-blur-sm">
+        <h3 className="text-xl font-semibold mb-4 text-center">How to Play</h3>
+        <div className="space-y-3 text-sm text-gray-300 leading-relaxed">
+          <p>🎯 <b>Goal:</b> Build an equation from the digits to match the target number.</p>
+          <p>➕➖✖️➗ <b>Operators:</b> Choose operators and click digits to form the equation.</p>
+          <p>⏰ <b>Time:</b> 60 seconds per turn (Genius mode may be shorter).</p>
+          <p>✅❌ <b>System:</b> Auto-checks answers and updates score.</p>
+          <p>👥 <b>Multiplayer:</b> Turns automatically switch between players.</p>
+          <br></br>
+          <br></br>
+        </div>
+      </div>
+
+      {/* Tips */}
+      <div className="bg-white/10 rounded-2xl px-6 py-4 text-center mb-8 backdrop-blur-sm">
+        <h4 className="text-lg font-semibold mb-2">Tips</h4>
+        <p className="text-sm text-gray-300">
+          Start with simple combinations; avoid division by zero and try operator order to match target.
+        </p>
+        <br></br>
+      </div>
+
+      {/* Buttons */}
+      <div className="flex justify-between gap-4">
+        <button
+          className="main-btn"
+          onClick={() => {
+            playSound("click");
+            setShowWelcomePopup(false);
+            setNickname("");
+            setPage("login");
+          }}
+        >
+          ← Back
+        </button>
+        <button
+          className="main-btn"
+          onClick={() => {
+            playSound("click");
+            setShowWelcomePopup(false);
+            setHasConfirmedName(true);
+            setPage("mode");
+            if (socket && nickname.trim()) socket.emit("setNickname", nickname);
+          }}
+        >
+          Continue to Game Mode →
+        </button>
+      </div>
+    </div>
+  </motion.div>
+)}
+
 
 {/* MODE PAGE ------------------------------------------------ */}
 {page === "mode" && (
