@@ -1,15 +1,5 @@
-/* =============================================================
- 🧩 IQ180 React App (Production-ready Clean Code)
----------------------------------------------------------------
- Single-file React component for the IQ180 multiplayer UI.
- - Socket.IO client connection
- - Host-synced timer
- - Validation & answer checking + auto-solve
- - Multilingual texts & themes
- - Simple local problem generator fallback
-=============================================================*/
-
-import { useState, useEffect, useRef } from "react";
+// src/App.jsx
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Howl } from "howler";
 import {
@@ -32,15 +22,53 @@ import bgmFile from "./sounds/bgm.mp3";
 import { io } from "socket.io-client";
 
 /* ---------- Config ---------- */
-// Use env var VITE_SERVER_URL or fallback to localhost
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:4000";
 const socket = io(SERVER_URL, { autoConnect: true, transports: ["websocket", "polling"] });
 
+/* --------------------------
+   Helper local generator/solver
+   -------------------------- */
+const generateProblemLocal = (m = "easy") => {
+  const nums = [];
+  while (nums.length < 5) nums.push(Math.floor(Math.random() * 9) + 1);
+  const ops = ["+", "-", "×", "÷"];
+  const expr = `${nums[0]}+${nums[1]}+${nums[2]}+${nums[3]}+${nums[4]}`;
+  // eslint-disable-next-line no-eval
+  const targetVal = Math.round(eval(expr));
+  return { digits: nums, operators: ops, disabledOps: [], target: targetVal, mode: m };
+};
+
+const findSolutionBrute = (digitsArr = [], tgt = 0, disabled = []) => {
+  if (!Array.isArray(digitsArr) || digitsArr.length === 0) return null;
+  const ops = ["+", "-", "*", "/"];
+  const permute = (arr) => {
+    if (arr.length <= 1) return [arr];
+    const res = [];
+    arr.forEach((v, i) => {
+      const rest = [...arr.slice(0, i), ...arr.slice(i + 1)];
+      permute(rest).forEach((p) => res.push([v, ...p]));
+    });
+    return res;
+  };
+  const numPerms = permute(digitsArr);
+  for (const nums of numPerms) {
+    for (let o1 of ops) for (let o2 of ops) for (let o3 of ops) for (let o4 of ops) {
+      const expr = `${nums[0]}${o1}${nums[1]}${o2}${nums[2]}${o3}${nums[3]}${o4}${nums[4]}`;
+      try {
+        // eslint-disable-next-line no-eval
+        const val = eval(expr);
+        if (Number.isFinite(val) && Math.abs(val - tgt) < 1e-9) {
+          return expr.replace(/\*/g, "×").replace(/\//g, "÷");
+        }
+      } catch {}
+    }
+  }
+  return null;
+};
+
 /* ---------- Component ---------- */
 export default function App() {
-  /* -------------------
-     MULTI-LANGUAGE & THEMES
-     ------------------- */
+  /* ---------- UI configs ---------- */
   const [lang, setLang] = useState("en");
   const texts = {
     en: {
@@ -149,68 +177,54 @@ export default function App() {
       accent: "#ff00a6",
       text: "#ffe6ff",
     },
-    auroraEmerald: {
-      name: "Aurora Emerald",
-      background: "linear-gradient(135deg, #003333, #006644, #001122)",
-      accent: "#00ffcc",
-      text: "#eafff4",
-    },
-    crimsonInferno: {
-      name: "Crimson Inferno",
-      background: "linear-gradient(135deg, #2b0000, #660000, #330000)",
-      accent: "#ff4444",
-      text: "#ffe5e5",
-    },
   };
   const [theme, setTheme] = useState("galaxyBlue");
   const [dropdownOpen, setDropdownOpen] = useState(null);
 
-  /* -------------------
-     SOUND ENGINE
-     ------------------- */
+  /* ---------- Sounds (refs so they persist) ---------- */
+  const clickRef = useRef(null);
+  const correctRef = useRef(null);
+  const wrongRef = useRef(null);
+  const timeoutRef = useRef(null);
+  const bgmRef = useRef(null);
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(0.4);
-  const clickSound = new Howl({ src: [clickSoundFile], volume: 0.6 });
-  const correctSound = new Howl({ src: [correctSoundFile], volume: 0.7 });
-  const wrongSound = new Howl({ src: [wrongSoundFile], volume: 0.7 });
-  const timeoutSound = new Howl({ src: [timeoutSoundFile], volume: 0.6 });
-  const [bgm] = useState(() => new Howl({ src: [bgmFile], loop: true }));
 
   useEffect(() => {
-    bgm.volume(volume);
-    if (volume === 0) setMuted(true);
-    if (!muted && !bgm.playing()) bgm.play();
-    if (muted) bgm.pause();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [muted, volume]);
+    clickRef.current = new Howl({ src: [clickSoundFile], volume: 0.6 });
+    correctRef.current = new Howl({ src: [correctSoundFile], volume: 0.7 });
+    wrongRef.current = new Howl({ src: [wrongSoundFile], volume: 0.7 });
+    timeoutRef.current = new Howl({ src: [timeoutSoundFile], volume: 0.6 });
+    bgmRef.current = new Howl({ src: [bgmFile], loop: true, volume });
 
-  const toggleMute = () => {
-    if (muted) {
-      setMuted(false);
-      setVolume(0.4);
-      bgm.play();
-    } else {
-      setMuted(true);
-      setVolume(0);
-      bgm.pause();
-    }
-  };
+    if (!muted) bgmRef.current.play();
+
+    return () => {
+      bgmRef.current?.stop();
+    };
+  }, []); // run once
+
+  useEffect(() => {
+    if (!bgmRef.current) return;
+    bgmRef.current.volume(volume);
+    if (muted) bgmRef.current.pause();
+    else if (!bgmRef.current.playing()) bgmRef.current.play();
+  }, [volume, muted]);
 
   const playSound = (type) => {
     if (muted) return;
-    const sounds = { click: clickSound, correct: correctSound, wrong: wrongSound, timeout: timeoutSound };
-    sounds[type]?.play();
+    if (type === "click") clickRef.current?.play();
+    if (type === "correct") correctRef.current?.play();
+    if (type === "wrong") wrongRef.current?.play();
+    if (type === "timeout") timeoutRef.current?.play();
   };
 
-  /* -------------------
-     GAME STATE
-     ------------------- */
+  /* ---------- App state ---------- */
   const [page, setPage] = useState("login");
   const [nickname, setNickname] = useState("");
   const [mode, setMode] = useState("easy");
   const [score, setScore] = useState(0);
   const [rounds, setRounds] = useState(0);
-  const [totalPlayers, setTotalPlayers] = useState(0);
 
   const [digits, setDigits] = useState([]);
   const [operators, setOperators] = useState(["+", "-", "×", "÷", "(", ")", "√"]);
@@ -219,38 +233,29 @@ export default function App() {
   const [expression, setExpression] = useState("");
 
   const [resultPopup, setResultPopup] = useState(null);
-  const [solution, setSolution] = useState(null);
+  const [solutionExpr, setSolutionExpr] = useState("");
   const [history, setHistory] = useState([]);
   const [lastWasNumber, setLastWasNumber] = useState(false);
-  const [lastWasSqrt, setLastWasSqrt] = useState(false);
-  const [solutionExpr, setSolutionExpr] = useState("");
-  const [endByName, setEndByName] = useState(null);
+  const [isMyTurn, setIsMyTurn] = useState(false);
 
-  const problemRef = useRef({ digits: [], target: 0, disabledOps: [] });
-
-  /* -------------------
-     MULTIPLAYER / ROOM
-     ------------------- */
   const [playerList, setPlayerList] = useState([]);
   const [waitingPlayers, setWaitingPlayers] = useState([]);
   const [canStart, setCanStart] = useState(false);
   const [preGameInfo, setPreGameInfo] = useState(null);
   const [countdown, setCountdown] = useState(0);
   const [showCountdown, setShowCountdown] = useState(false);
-  const [gameState, setGameState] = useState({});
-  const [isMyTurn, setIsMyTurn] = useState(false);
 
-  const [autoResumeCount, setAutoResumeCount] = useState(null);
-  const [reactionPopup, setReactionPopup] = useState(null);
+  const [scores, setScores] = useState({});
   const [personalBest, setPersonalBest] = useState(0);
+  const [reactionPopup, setReactionPopup] = useState(null);
 
-  /* -------------------
-     TIMER (host-synced)
-     ------------------- */
+  /* ---------- Timer (host-synced) ---------- */
   const [baseTime, setBaseTime] = useState(null);
   const [timeLeft, setTimeLeft] = useState(60);
   const [running, setRunning] = useState(false);
   const timerRef = useRef(null);
+  const problemRef = useRef({ digits: [], target: 0, disabledOps: [] });
+  const [autoResumeCount, setAutoResumeCount] = useState(null);
 
   const stopTimer = () => {
     if (timerRef.current) {
@@ -261,98 +266,22 @@ export default function App() {
     setBaseTime(null);
   };
 
-  const startGame = (playMode = mode) => {
-    // If host triggers a new game locally, inform server.
-    socket.emit("startGame", { mode: playMode, nickname });
-  };
-
-  /* -------------------
-     small local problem generator (fallback)
-     ------------------- */
-  const generateProblem = (m = "easy") => {
-    // simple generator to avoid undefined errors when server isn't providing problems
-    const nums = [];
-    while (nums.length < 5) nums.push(Math.floor(Math.random() * 9) + 1);
-    const ops = ["+", "-", "×", "÷"];
-    const disabled = m === "hard" ? [] : [];
-    // Pick a target by combining randomly
-    const expr = `${nums[0]}+${nums[1]}+${nums[2]}+${nums[3]}+${nums[4]}`;
-    // eslint-disable-next-line no-eval
-    const targetVal = Math.round(eval(expr));
-    return { digits: nums, operators: ops, disabledOps: disabled, target: targetVal, mode: m };
-  };
-
-  /* -------------------
-     findSolution solver (brute force for 5 numbers)
-     ------------------- */
-  const findSolution = (digitsArr = [], tgt = 0, disabled = []) => {
-    if (!Array.isArray(digitsArr) || digitsArr.length === 0) return null;
-    const ops = ["+", "-", "*", "/"].filter(
-      (op) => !disabled.includes(op === "*" ? "×" : op === "/" ? "÷" : op)
-    );
-
-    const permute = (arr) => {
-      if (arr.length <= 1) return [arr];
-      const result = [];
-      arr.forEach((val, i) => {
-        const rest = [...arr.slice(0, i), ...arr.slice(i + 1)];
-        permute(rest).forEach((perm) => result.push([val, ...perm]));
-      });
-      return result;
-    };
-
-    const numberPerms = permute(digitsArr);
-
-    for (const numArr of numberPerms) {
-      for (let o1 of ops)
-        for (let o2 of ops)
-          for (let o3 of ops)
-            for (let o4 of ops) {
-              const expr = `${numArr[0]}${o1}${numArr[1]}${o2}${numArr[2]}${o3}${numArr[3]}${o4}${numArr[4]}`;
-              try {
-                // eslint-disable-next-line no-eval
-                const result = eval(expr);
-                if (Number.isFinite(result) && Math.abs(result - tgt) < 1e-9) {
-                  return expr.replace(/\*/g, "×").replace(/\//g, "÷");
-                }
-              } catch {}
-            }
-    }
-    return null;
-  };
-
-  /* -------------------
-     SOCKET.IO BINDINGS (single useEffect)
-     ------------------- */
+  /* ---------- Socket bindings ---------- */
   useEffect(() => {
     if (!socket) return;
 
-    // connect
     const onConnect = () => {
-      console.log("🟢 Connected to server:", SERVER_URL);
-      if (page === "mode" && nickname.trim()) {
-        socket.emit("setNickname", nickname);
-      }
+      console.log("connected to", SERVER_URL);
+      if (nickname.trim()) socket.emit("setNickname", nickname);
     };
 
-    const onPlayerList = (list) => {
-      setPlayerList(Array.isArray(list) ? list : []);
-    };
-
-    const onWaitingList = (data) => {
-      if (!data) return;
-      if (data.mode === mode) setWaitingPlayers(Array.isArray(data.players) ? data.players : []);
-    };
-
-    const onCanStart = (data) => {
-      if (!data) return;
-      if (data.mode === mode) setCanStart(data.canStart);
-    };
-
-    const onPreGameStart = (data) => {
-      if (!data) return;
-      setPreGameInfo({ mode: data.mode, starter: data.starter, players: data.players });
-      let counter = data.countdown ?? 3;
+    const onPlayerList = (list) => setPlayerList(Array.isArray(list) ? list : []);
+    const onWaitingList = (d) => { if (d?.mode === mode) setWaitingPlayers(Array.isArray(d.players) ? d.players : []); };
+    const onCanStart = (d) => { if (d?.mode === mode) setCanStart(!!d.canStart); };
+    const onPreGameStart = (d) => {
+      if (!d) return;
+      setPreGameInfo({ mode: d.mode, starter: d.starter, players: d.players });
+      let counter = d.countdown ?? 3;
       setCountdown(counter);
       setShowCountdown(true);
       const t = setInterval(() => {
@@ -364,65 +293,48 @@ export default function App() {
         }
       }, 1000);
     };
-
-    const onGameStart = (data) => {
-      if (!data) return;
-      setDigits(data.digits || []);
-      setOperators(data.operators || operators);
-      setDisabledOps(data.disabledOps || []);
-      setTarget(data.target || 0);
-      setMode(data.mode || "easy");
-      problemRef.current = {
-        digits: data.digits || [],
-        target: data.target || 0,
-        disabledOps: data.disabledOps || [],
-      };
-      setSolutionExpr("");
-      const list = Array.isArray(data.players) && data.players.length > 0 ? data.players : Array.isArray(data.turnOrder) ? data.turnOrder : [];
-      const uniquePlayers = Array.from(new Set([...list, nickname].filter(Boolean)));
-      setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
-      setGameState(data);
-      const myTurn = data.currentTurn === nickname;
-      setIsMyTurn(myTurn);
-      setPage("game");
-      setExpression("");
-      setLastWasNumber(false);
-      setLastWasSqrt(false);
-      setResultPopup(null);
-      setSolution(null);
-      setScore(0);
-      setRounds(0);
-      setTimeLeft(data.mode === "hard" ? 30 : 60);
-      setRunning(myTurn);
-      console.log("🚀 Game started:", data);
-    };
-
-    const onNewRound = (d) => {
+    const onGameStart = (d) => {
       if (!d) return;
       setDigits(d.digits || []);
       setOperators(d.operators || operators);
       setDisabledOps(d.disabledOps || []);
       setTarget(d.target || 0);
-      if (d.round !== undefined) setRounds(d.round);
-      setExpression("");
-      setLastWasNumber(false);
-      setResultPopup(null);
+      setMode(d.mode || "easy");
       problemRef.current = {
         digits: d.digits || [],
         target: d.target || 0,
         disabledOps: d.disabledOps || [],
       };
+      setScores(Object.fromEntries((Array.isArray(d.players) ? d.players : []).map((p) => [p, 0])));
+      setGameStateLocal(d);
+      setIsMyTurn(d.currentTurn === nickname);
+      setPage("game");
+      setExpression("");
+      setLastWasNumber(false);
+      setResultPopup(null);
       setSolutionExpr("");
+      setScore(0);
+      setRounds(1);
+      setTimeLeft(d.mode === "hard" ? 30 : 60);
+      setRunning(d.currentTurn === nickname);
     };
-
+    const onNewRound = (d) => {
+      if (!d) return;
+      setDigits(d.digits || []);
+      setDisabledOps(d.disabledOps || []);
+      setTarget(d.target || 0);
+      if (d.round !== undefined) setRounds(d.round);
+      setExpression("");
+      problemRef.current = { digits: d.digits || [], target: d.target || 0, disabledOps: d.disabledOps || [] };
+      setSolutionExpr("");
+      setResultPopup(null);
+    };
     const onTurnSwitch = (d) => {
       if (!d) return;
-      setGameState((prev) => ({ ...prev, currentTurn: d.nextTurn }));
-      if (d.round !== undefined) setRounds(d.round);
       setIsMyTurn(d.nextTurn === nickname);
+      if (d.round !== undefined) setRounds(d.round);
       setRunning(false);
     };
-
     const onSyncTimer = ({ mode: syncMode, startTime }) => {
       if (!startTime) return;
       setBaseTime(startTime);
@@ -432,69 +344,51 @@ export default function App() {
       setTimeLeft(remaining);
       setRunning(true);
     };
-
     const onYourTurn = ({ mode: myMode }) => {
-      // If server informs it's your turn and sends no problem, generate fallback
-      console.log("🎯 yourTurn from server");
       setIsMyTurn(true);
-      if (!problemRef.current || (Array.isArray(problemRef.current.digits) && problemRef.current.digits.length === 0)) {
-        const g = generateProblem(myMode);
+      setRunning(true);
+      if (!problemRef.current || !problemRef.current.digits?.length) {
+        const g = generateProblemLocal(myMode);
         setDigits(g.digits);
-        setOperators(g.operators);
         setDisabledOps(g.disabledOps);
         setTarget(g.target);
         problemRef.current = { digits: g.digits, target: g.target, disabledOps: g.disabledOps };
       }
-      setRunning(true);
       setExpression("");
       setLastWasNumber(false);
-      setLastWasSqrt(false);
       setResultPopup(null);
-      setSolution(null);
-      setPage("game");
     };
-
-    const onAnswerResult = (data) => {
-      if (!data) return;
-      // update scoreboard locally
-      setScores((prev) => {
-        const next = { ...(prev || {}) };
-        if (!(data.nickname in next)) next[data.nickname] = 0;
-        if (data.correct) next[data.nickname] += 1;
-        return next;
-      });
-      if (data.round !== undefined) setRounds(data.round);
-      if (data.nickname !== nickname) {
-        console.log(`📩 ${data.nickname} answered: ${data.correct ? "correct" : "wrong"}`);
+    const onAnswerResult = (d) => {
+      if (!d) return;
+      setScores((prev) => ({ ...(prev || {}), [d.nickname]: (prev?.[d.nickname] || 0) + (d.correct ? 1 : 0) }));
+      if (d.winner) {
+        // optional handling
       }
     };
-
-    const onGameOver = (data) => {
-      console.log("💀 gameover", data);
-      setEndByName(data?.by || null);
+    const onGameOver = (d) => {
       setResultPopup("gameover");
       stopTimer();
       setRunning(false);
     };
-
     const onPlayerLeft = (d) => {
       if (!d) return;
-      if (d.mode === mode) {
-        setWaitingPlayers((prev) => prev.filter((p) => p !== d.nickname));
-      }
+      if (d.mode === mode) setWaitingPlayers((p) => p.filter((n) => n !== d.nickname));
     };
-
     const onReaction = (d) => {
-      if (!d) return;
       setReactionPopup(`${d.from}: ${d.emoji}`);
       setTimeout(() => setReactionPopup(null), 2000);
     };
-
     const onPersonalBest = (d) => {
       if (d?.best !== undefined) setPersonalBest(d.best);
     };
 
-    // Bind
+    // local helper to keep gameState minimal
+    const setGameStateLocal = (d) => {
+      // store only fields we need
+      const minimal = { turnOrder: d.turnOrder || d.players || [], currentTurn: d.currentTurn || null, mode: d.mode || mode };
+      setGameState(minimal => ({ ...(minimal || {}), ...minimal, ...minimal })); // no-op just to keep React happy (we store minimal if needed)
+    };
+
     socket.on("connect", onConnect);
     socket.on("playerList", onPlayerList);
     socket.on("waitingList", onWaitingList);
@@ -511,7 +405,6 @@ export default function App() {
     socket.on("reaction", onReaction);
     socket.on("personalBest", onPersonalBest);
 
-    // cleanup
     return () => {
       socket.off("connect", onConnect);
       socket.off("playerList", onPlayerList);
@@ -530,44 +423,32 @@ export default function App() {
       socket.off("personalBest", onPersonalBest);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nickname, page, mode]);
+  }, [nickname, mode]);
 
-  /* -------------------
-     Host-synced ticker
-     ------------------- */
+  /* ---------- Host-synced ticker ---------- */
   useEffect(() => {
     if (!running || baseTime === null) return;
+    if (timerRef.current) clearInterval(timerRef.current);
 
     const tick = () => {
       const elapsed = Math.floor((Date.now() - baseTime) / 1000);
       const roundTime = mode === "hard" ? 30 : 60;
       const remaining = Math.max(roundTime - elapsed, 0);
       setTimeLeft(remaining);
-
       if (remaining <= 0) {
         stopTimer();
         playSound("timeout");
         setResultPopup("timeout");
-
-        const { digits: pdigits, target: pt, disabledOps: pdisabled } = problemRef.current;
+        // compute solution
         try {
-          const sol = findSolution(pdigits || [], pt || 0, pdisabled || []);
+          const sol = findSolutionBrute(problemRef.current.digits || [], problemRef.current.target || 0, problemRef.current.disabledOps || []);
           setSolutionExpr(sol || "No valid solution found");
         } catch {
           setSolutionExpr("No valid solution found");
         }
-
         // notify server
-        socket.emit("answerResult", {
-          nickname,
-          result: "timeout",
-          correct: false,
-          score,
-          round: rounds + 1,
-          mode,
-        });
-
-        // auto-resume
+        socket.emit("answerResult", { nickname, result: "timeout", correct: false, score, round: rounds + 1, mode });
+        // auto-resume after countdown
         let count = 3;
         setAutoResumeCount(count);
         const t = setInterval(() => {
@@ -585,43 +466,22 @@ export default function App() {
     };
 
     timerRef.current = setInterval(tick, 1000);
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, baseTime, mode, nickname, rounds]);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); timerRef.current = null; };
+  }, [running, baseTime, mode, nickname, rounds, score]);
 
-  /* -------------------
-     CHECK ANSWER
-     ------------------- */
+  /* ---------- Actions ---------- */
+  const startGame = (playMode = mode) => {
+    socket.emit("startGame", { mode: playMode, nickname });
+  };
+
   const checkAnswer = () => {
     try {
       const expr = expression.trim();
+      if (!/\d/.test(expr)) { setResultPopup("invalid"); return; }
+      if (/^[+\-×÷*/)]/.test(expr)) { setResultPopup("invalid"); return; }
+      if (/[+\-×÷*/(]$/.test(expr)) { setResultPopup("invalid"); return; }
 
-      // basic validation
-      if (!/\d/.test(expr)) {
-        setResultPopup("invalid");
-        return;
-      }
-      if (/^[+\-×÷*/)]/.test(expr)) {
-        setResultPopup("invalid");
-        return;
-      }
-      if (/[+\-×÷*/(]$/.test(expr)) {
-        setResultPopup("invalid");
-        return;
-      }
-
-      const clean = expr
-        .replace(/×/g, "*")
-        .replace(/÷/g, "/")
-        .replace(/\^/g, "**")
-        .replace(/√(\d+|\([^()]+\))/g, "Math.sqrt($1)");
-
-      // evaluate (beware eval)
+      const clean = expr.replace(/×/g, "*").replace(/÷/g, "/").replace(/\^/g, "**").replace(/√(\d+|\([^()]+\))/g, "Math.sqrt($1)");
       // eslint-disable-next-line no-eval
       const result = eval(clean);
       const correct = Number.isFinite(result) && Math.abs(result - target) < 1e-9;
@@ -635,40 +495,28 @@ export default function App() {
         playSound("wrong");
         setResultPopup("wrong");
         try {
-          const sol = findSolution(digits, target, disabledOps);
+          const sol = findSolutionBrute(digits, target, disabledOps);
           setSolutionExpr(sol || "No valid solution found");
-        } catch (err) {
-          console.error("findSolution error", err);
+        } catch {
           setSolutionExpr("No valid solution found");
         }
       }
 
-      setHistory((h) => [...h, { round: rounds + 1, result, ok: correct }]);
+      setHistory((h) => [...h, { round: rounds + 1, result: correct ? target : result, ok: correct }]);
 
       if (socket && socket.connected) {
-        socket.emit("answerResult", {
-          nickname,
-          mode,
-          result,
-          correct,
-          score: correct ? score + 1 : score,
-          round: rounds + 1,
-        });
+        socket.emit("answerResult", { nickname, mode, result: correct ? target : result, correct, score: correct ? score + 1 : score, round: rounds + 1 });
       }
 
-      // start short auto-resume (3s)
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
+      // auto-resume
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
       let count = 3;
       setAutoResumeCount(count);
-      timerRef.current = setInterval(() => {
+      const t = setInterval(() => {
         count -= 1;
         setAutoResumeCount(count);
         if (count <= 0) {
-          clearInterval(timerRef.current);
-          timerRef.current = null;
+          clearInterval(t);
           setAutoResumeCount(null);
           setResultPopup(null);
           if (isMyTurn) {
@@ -678,167 +526,72 @@ export default function App() {
         }
       }, 1000);
     } catch (err) {
-      console.error("❌ checkAnswer unexpected error:", err);
+      console.error("checkAnswer error", err);
       setResultPopup("invalid");
       setSolutionExpr("No valid solution found");
     }
   };
 
-  /* -------------------
-     UI helpers
-     ------------------- */
-  const isHost = gameState?.turnOrder?.[0] === nickname;
+  const leaveGame = () => {
+    stopTimer();
+    setRunning(false);
+    setResultPopup("gameover");
+    if (socket && socket.connected) socket.emit("playerLeftGame", { nickname, mode });
+    setPage("mode");
+  };
 
   const endGameForAll = () => {
     if (resultPopup === "gameover") return;
-    try { playSound("click"); } catch {}
+    playSound("click");
     stopTimer();
     setRunning(false);
     setResultPopup("gameover");
-    if (socket && socket.connected) {
-      socket.emit("endGame", { mode, by: nickname, reason: "endedByPlayer" });
-    }
+    if (socket && socket.connected) socket.emit("endGame", { mode, by: nickname, reason: "endedByPlayer" });
   };
 
-  const leaveGame = () => {
-    try { playSound("click"); } catch {}
-    stopTimer();
-    setRunning(false);
-    setResultPopup("gameover");
-    if (socket && socket.connected) {
-      socket.emit("playerLeftGame", { nickname, mode });
-    }
-  };
+  /* ---------- Small UI helpers ---------- */
+  const isHost = (gameState?.turnOrder?.[0] === nickname) || false;
+  function playSound(type) { try { playSoundInternal(type); } catch { } }
+  function playSoundInternal(type) {
+    if (muted) return;
+    if (type === "click") clickRef.current?.play();
+    if (type === "correct") correctRef.current?.play();
+    if (type === "wrong") wrongRef.current?.play();
+    if (type === "timeout") timeoutRef.current?.play();
+  }
 
-  /* ---------- Animations & theme ---------- */
+  /* ---------- Render (kept structure similar to original) ---------- */
   const fade = { initial: { opacity: 0, y: 20 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -20 } };
   const currentTheme = themes[theme] || themes.galaxyBlue;
 
-  /* -------------------
-     RENDER
-     ------------------- */
   return (
-    <motion.div
-      key={theme}
-      className="container"
-      data-theme={theme}
-      style={{ background: currentTheme.background, color: currentTheme.text }}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.8 }}
-    >
-      {/* TOP CONTROLS */}
+    <motion.div className="container" style={{ background: currentTheme.background, color: currentTheme.text }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.6 }}>
+      {/* Top controls */}
       <div className="top-controls">
         <div className="lang-dropdown">
-          <button className="control-btn" onClick={() => setDropdownOpen(dropdownOpen === "lang" ? null : "lang")}>
-            <FaGlobe />
-          </button>
-          {dropdownOpen === "lang" && (
-            <div className="dropdown-menu">
-              {Object.keys(texts).map((code) => (
-                <div
-                  key={code}
-                  className={`dropdown-item ${lang === code ? "active" : ""}`}
-                  onClick={() => {
-                    setLang(code);
-                    setDropdownOpen(null);
-                  }}
-                >
-                  {code.toUpperCase()}
-                </div>
-              ))}
-            </div>
-          )}
+          <button className="control-btn" onClick={() => setDropdownOpen(dropdownOpen === "lang" ? null : "lang")}><FaGlobe /></button>
+          {dropdownOpen === "lang" && (<div className="dropdown-menu">{Object.keys(texts).map((c) => <div key={c} className={`dropdown-item ${lang === c ? "active" : ""}`} onClick={() => { setLang(c); setDropdownOpen(null); }}>{c.toUpperCase()}</div>)}</div>)}
         </div>
 
         <div className="theme-dropdown">
-          <button className="control-btn" onClick={() => setDropdownOpen(dropdownOpen === "theme" ? null : "theme")}>
-            <FaPalette />
-          </button>
-          {dropdownOpen === "theme" && (
-            <div className="dropdown-menu">
-              {Object.entries(themes).map(([key, val]) => (
-                <div key={key} className={`dropdown-item ${theme === key ? "active" : ""}`} onClick={() => { setTheme(key); setDropdownOpen(null); }}>
-                  {val.name}
-                </div>
-              ))}
-            </div>
-          )}
+          <button className="control-btn" onClick={() => setDropdownOpen(dropdownOpen === "theme" ? null : "theme")}><FaPalette /></button>
+          {dropdownOpen === "theme" && (<div className="dropdown-menu">{Object.entries(themes).map(([k, v]) => <div key={k} className={`dropdown-item ${theme === k ? "active" : ""}`} onClick={() => { setTheme(k); setDropdownOpen(null); }}>{v.name}</div>)}</div>)}
         </div>
 
         <div className="volume-dropdown">
-          <button className="control-btn" onClick={() => setDropdownOpen(dropdownOpen === "volume" ? null : "volume")}>
-            <FaVolumeUp />
-          </button>
+          <button className="control-btn" onClick={() => setDropdownOpen(dropdownOpen === "volume" ? null : "volume")}><FaVolumeUp /></button>
           {dropdownOpen === "volume" && (
             <div className="dropdown-menu volume-menu">
               <div className="volume-control">
-                <FaVolumeUp className="volume-icon" onClick={toggleMute} style={{ cursor: "pointer" }} />
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  value={muted ? 0 : volume}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    setVolume(val);
-                    setMuted(val === 0);
-                  }}
-                  className="volume-slider"
-                />
+                <FaVolumeUp className="volume-icon" onClick={() => { setMuted((m) => !m); }} style={{ cursor: "pointer" }} />
+                <input type="range" min="0" max="1" step="0.05" value={muted ? 0 : volume} onChange={(e) => { const val = parseFloat(e.target.value); setVolume(val); setMuted(val === 0); }} className="volume-slider" />
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Back Button */}
-      {page !== "login" && (
-        <button
-          className="back-btn"
-          onClick={() => {
-            playSound("click");
-            if (page === "game") {
-              // gracefully leave the match view
-              if (timerRef.current) {
-                clearInterval(timerRef.current);
-                timerRef.current = null;
-              }
-              setRunning(false);
-              setBaseTime(null);
-              const activeMode = gameState?.mode || mode;
-              socket.emit("playerLeftGame", { nickname, mode: activeMode });
-              socket.off("gameStart");
-              socket.off("yourTurn");
-              socket.off("turnSwitch");
-              socket.off("newRound");
-              socket.off("syncTimer");
-              socket.off("answerResult");
-              setIsMyTurn(false);
-              setExpression("");
-              setTarget(null);
-              setDigits([]);
-              setOperators(["+", "-", "×", "÷", "(", ")", "√"]);
-              setDisabledOps([]);
-              setResultPopup(null);
-              setSolution(null);
-              setPage("mode");
-              socket.emit("getPersonalBest", { nickname });
-            } else if (page === "waiting" || page === "mode") {
-              socket.emit("leaveLobby", nickname);
-              // leave but stay online
-              setPage("login");
-            } else {
-              setPage("login");
-            }
-          }}
-        >
-          <FaArrowLeft />
-        </button>
-      )}
-
-      {/* PAGE SWITCHER */}
+      {/* Page content (login/mode/waiting/game/stats) */}
       <AnimatePresence mode="wait">
         {page === "login" && (
           <motion.div key="login" className="login-page" {...fade}>
@@ -846,134 +599,49 @@ export default function App() {
               <h1 className="title">{T.title}</h1>
               <p className="subtitle">{T.subtitle}</p>
               <input type="text" placeholder={T.enterName} value={nickname} onChange={(e) => setNickname(e.target.value)} />
-              <button
-                className="main-btn"
-                onClick={() => {
-                  if (nickname.trim()) {
-                    playSound("click");
-                    socket.emit("setNickname", nickname);
-                    setPage("mode");
-                  }
-                }}
-              >
-                {T.start} <FaArrowRight />
-              </button>
+              <button className="main-btn" onClick={() => { if (nickname.trim()) { playSoundInternal("click"); socket.emit("setNickname", nickname); setPage("mode"); } }}>{T.start} <FaArrowRight /></button>
             </div>
           </motion.div>
         )}
 
         {page === "mode" && (
           <motion.div key="mode" className="mode-page" {...fade}>
-            <h2 className="big-player">
-              {T.playerName}: <span>{nickname}</span>
-            </h2>
-
+            <h2 className="big-player">{T.playerName}: <span>{nickname}</span></h2>
             <div className="online-box glass-card">
-              <h3 className="online-title">
-                👥 {lang === "th" ? "ผู้เล่นที่ออนไลน์" : lang === "zh" ? "在线玩家" : "Players Online"}
-              </h3>
-
+              <h3 className="online-title">👥 {lang === "th" ? "ผู้เล่นที่ออนไลน์" : lang === "zh" ? "在线玩家" : "Players Online"}</h3>
               {playerList && playerList.length > 0 ? (
-                <ul className="online-list">
-                  {playerList.map((p, i) => (
-                    <li key={i} className={p === nickname ? "self" : ""}>
-                      {p === nickname ? <span className="you-label">{lang === "th" ? "คุณ" : lang === "zh" ? "你" : "You"}</span> : p}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="online-empty">{lang === "th" ? "ไม่มีผู้เล่นออนไลน์" : lang === "zh" ? "暂无在线玩家" : "No players online"}</p>
-              )}
+                <ul className="online-list">{playerList.map((p, i) => <li key={i} className={p === nickname ? "self" : ""}>{p === nickname ? <span className="you-label">{lang === "th" ? "คุณ" : lang === "zh" ? "你" : "You"}</span> : null}{p}</li>)}</ul>
+              ) : (<p className="online-empty">{lang === "th" ? "ไม่มีผู้เล่นออนไลน์" : lang === "zh" ? "暂无在线玩家" : "No players online"}</p>)}
             </div>
 
             <h1 className="select-mode-title">{T.selectMode}</h1>
-
             <div className="mode-buttons">
-              <button
-                className="mode-btn glass-btn"
-                onClick={() => {
-                  playSound("click");
-                  setMode("easy");
-                  socket.emit("joinGame", { nickname, mode: "easy" });
-                  setPage("waiting");
-                }}
-              >
-                {T.easy}
-              </button>
-
-              <button
-                className="mode-btn glass-btn"
-                onClick={() => {
-                  playSound("click");
-                  setMode("hard");
-                  socket.emit("joinGame", { nickname, mode: "hard" });
-                  setPage("waiting");
-                }}
-              >
-                {T.hard}
-              </button>
+              <button className="mode-btn glass-btn" onClick={() => { playSoundInternal("click"); setMode("easy"); socket.emit("joinGame", { nickname, mode: "easy" }); setPage("waiting"); }}>{T.easy}</button>
+              <button className="mode-btn glass-btn" onClick={() => { playSoundInternal("click"); setMode("hard"); socket.emit("joinGame", { nickname, mode: "hard" }); setPage("waiting"); }}>{T.hard}</button>
             </div>
-
             <div className="personal-best">🏆 Personal Best: {personalBest}</div>
           </motion.div>
         )}
 
         {page === "waiting" && (
           <motion.div key="waiting" className="waiting-page" {...fade}>
-            <h1 className="waiting-title">
-              {waitingPlayers.length > 1 ? (lang === "th" ? "พร้อมเริ่มเกม!" : lang === "zh" ? "准备开始游戏！" : "Ready to Start!") : lang === "th" ? "⏳ รอผู้เล่น..." : lang === "zh" ? "⏳ 等待玩家..." : "⏳ Waiting for players..."}
-            </h1>
-
+            <h1 className="waiting-title">{waitingPlayers.length > 1 ? (lang === "th" ? "พร้อมเริ่มเกม!" : lang === "zh" ? "准备开始游戏！" : "Ready to Start!") : (lang === "th" ? "⏳ รอผู้เล่น..." : lang === "zh" ? "⏳ 等待玩家..." : "⏳ Waiting for players...")}</h1>
             <h2>{lang === "th" ? "โหมด" : lang === "zh" ? "模式" : "Mode"}: <span className="highlight">{mode === "easy" ? T.easy : T.hard}</span></h2>
+            <div className="waiting-box glass-card">{waitingPlayers.length > 0 ? <ul>{waitingPlayers.map((p, i) => <li key={i}>{p}</li>)}</ul> : <p>{lang === "th" ? "ยังไม่มีผู้เล่นในห้องนี้" : lang === "zh" ? "该房间暂无玩家" : "No players yet"}</p>}</div>
 
-            <div className="waiting-box glass-card">
-              {waitingPlayers.length > 0 ? <ul>{waitingPlayers.map((p, i) => <li key={i}>{p}</li>)}</ul> : <p>{lang === "th" ? "ยังไม่มีผู้เล่นในห้องนี้" : lang === "zh" ? "该房间暂无玩家" : "No players yet"}</p>}
-            </div>
+            {waitingPlayers.length > 1 && <button className="main-btn" onClick={() => socket.emit("startGame", { mode, nickname })}>🚀 {lang === "th" ? "เริ่มเกม" : lang === "zh" ? "开始游戏" : "Start Game"}</button>}
 
-            {waitingPlayers.length > 1 && (
-              <button className="main-btn" onClick={() => socket.emit("startGame", { mode, nickname })}>
-                🚀 {lang === "th" ? "เริ่มเกม" : lang === "zh" ? "开始游戏" : "Start Game"}
-              </button>
-            )}
-
-            <button
-              className="secondary-btn"
-              onClick={() => {
-                playSound("click");
-                socket.emit("leaveGame", { nickname, mode });
-                setPage("mode");
-              }}
-            >
-              ← {lang === "th" ? "ออกจากห้อง" : lang === "zh" ? "离开房间" : "Leave Room"}
-            </button>
+            <button className="secondary-btn" onClick={() => { playSoundInternal("click"); socket.emit("leaveLobby", nickname); setPage("mode"); }}>← {lang === "th" ? "ออกจากห้อง" : lang === "zh" ? "离开房间" : "Leave Room"}</button>
           </motion.div>
         )}
 
-        {/* pre-game popup */}
-        {preGameInfo && countdown > 0 && (
-          <motion.div key="preGame" className="popup countdown-popup" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ type: "spring", stiffness: 120 }}>
-            <h2>{lang === "th" ? `${preGameInfo.starter} เริ่มเกม!` : lang === "zh" ? `${preGameInfo.starter} 开始了游戏！` : `${preGameInfo.starter} started the game!`}</h2>
-            <h1 className="countdown-number">{countdown}</h1>
-          </motion.div>
-        )}
-
-        {/* GAME PAGE */}
         {page === "game" && (
           <motion.div key="game" className="game-page" {...fade}>
             <div className="game-header">
-              <h2 className="big-player">
-                {T.playerName}: <span>{nickname}</span>
-              </h2>
-
-              <div style={{ position: "fixed", left: "50%", bottom: 16, transform: "translateX(-50%)", display: "flex", gap: 12, justifyContent: "center", alignItems: "center", flexWrap: "wrap", zIndex: 20, padding: "8px 12px", borderRadius: 12, backdropFilter: "blur(6px)" }}>
-                <button className="glass-btn" onClick={leaveGame}>
-                  <FaSignOutAlt /> {lang === "th" ? "จบเกม" : lang === "zh" ? "结束游戏" : "End Game"}
-                </button>
-                {isHost && (
-                  <button className="glass-btn" style={{ borderColor: "rgba(255,100,100,0.6)" }} onClick={endGameForAll}>
-                    🛑 {lang === "th" ? "จบเกม" : lang === "zh" ? "结束游戏" : "End Game"}
-                  </button>
-                )}
+              <h2 className="big-player">{T.playerName}: <span>{nickname}</span></h2>
+              <div style={{ position: "fixed", left: "50%", bottom: 16, transform: "translateX(-50%)", display: "flex", gap: 12 }}>
+                <button className="glass-btn" onClick={leaveGame}><FaSignOutAlt /> {lang === "th" ? "จบเกม" : lang === "zh" ? "结束游戏" : "End Game"}</button>
+                {isHost && <button className="glass-btn" style={{ borderColor: "rgba(255,100,100,0.6)" }} onClick={endGameForAll}>🛑 {lang === "th" ? "จบเกม" : lang === "zh" ? "结束游戏" : "End Game"}</button>}
               </div>
 
               {isMyTurn ? (
@@ -988,42 +656,27 @@ export default function App() {
                 </>
               ) : (
                 <div className="waiting-header">
-                  <h3 className="turn-status">⏳ Waiting for <span className="highlight">{gameState?.currentTurn}</span>...</h3>
+                  <h3 className="turn-status">⏳ Waiting for <span className="highlight">{/* server-provided current */}</span>...</h3>
                   <h1 className={`waiting-time ${timeLeft <= 10 ? "time-critical" : ""}`}>{timeLeft > 0 ? `${timeLeft}s` : "00s"}</h1>
                 </div>
               )}
             </div>
 
-            {/* body */}
-            {!isMyTurn ? (
-              <div className="waiting-turn glass-card">
-                <h2 className="waiting-title">⏳ Waiting for <span className="highlight">{gameState?.currentTurn}</span>...</h2>
-                <div className="waiting-timer"><h1 className={`time-left ${timeLeft <= 10 ? "time-critical" : ""}`}>{timeLeft > 0 ? `${timeLeft}s` : "00s"}</h1></div>
-                <p className="hint-text">Please wait until it's your turn to play.</p>
-                <div className="reactions">
-                  <button onClick={() => socket.emit("reaction", { mode, emoji: "👏", nickname })}>👏</button>
-                  <button onClick={() => socket.emit("reaction", { mode, emoji: "😮", nickname })}>😮</button>
-                  <button onClick={() => socket.emit("reaction", { mode, emoji: "😭", nickname })}>😭</button>
-                  <button onClick={() => socket.emit("reaction", { mode, emoji: "🔥", nickname })}>🔥</button>
+            <div className="content">
+              {!isMyTurn ? (
+                <div className="waiting-turn glass-card">
+                  <h2 className="waiting-title">⏳ Waiting...</h2>
+                  <div className="waiting-timer"><h1 className={`time-left ${timeLeft <= 10 ? "time-critical" : ""}`}>{timeLeft > 0 ? `${timeLeft}s` : "00s"}</h1></div>
+                  <p className="hint-text">Please wait until it's your turn.</p>
                 </div>
-              </div>
-            ) : (
-              <>
-                {/* digits */}
-                <div className="digits-grid">
-                  {digits.map((n) => {
+              ) : (
+                <>
+                  <div className="digits-grid">{digits.map((n) => {
                     const used = expression.includes(String(n));
-                    return (
-                      <button key={n} disabled={lastWasNumber || used} className={`digit-btn ${used ? "used" : ""}`} onClick={() => { playSound("click"); if (!used && !lastWasNumber) { setExpression((p) => p + n); setLastWasNumber(true); } }}>
-                        {n}
-                      </button>
-                    );
-                  })}
-                </div>
+                    return <button key={n} disabled={lastWasNumber || used} className={`digit-btn ${used ? "used" : ""}`} onClick={() => { playSoundInternal("click"); if (!used && !lastWasNumber) { setExpression((p) => p + n); setLastWasNumber(true); } }}>{n}</button>;
+                  })}</div>
 
-                {/* operators */}
-                <div className="ops-grid">
-                  {operators.map((op) => {
+                  <div className="ops-grid">{operators.map((op) => {
                     const lastChar = expression.slice(-1);
                     const openCount = (expression.match(/\(/g) || []).length;
                     const closeCount = (expression.match(/\)/g) || []).length;
@@ -1043,143 +696,47 @@ export default function App() {
                     const isDisabled = logicDisabled || lockedDisabled;
                     const className = lockedDisabled ? "op-btn disabled" : "op-btn";
 
-                    return (
-                      <button key={op} disabled={isDisabled} className={className} onClick={() => {
-                        if (isDisabled) return;
-                        playSound("click");
-                        setExpression((prev) => prev + op);
-                        if (["+", "-", "×", "÷", "(", "√"].includes(op)) setLastWasNumber(false);
-                        else if (op === ")") setLastWasNumber(true);
-                      }}>
-                        {op}
-                      </button>
-                    );
-                  })}
-                </div>
+                    return <button key={op} disabled={isDisabled} className={className} onClick={() => { if (isDisabled) return; playSoundInternal("click"); setExpression((p) => p + op); if (["+", "-", "×", "÷", "(", "√"].includes(op)) setLastWasNumber(false); else if (op === ")") setLastWasNumber(true); }}>{op}</button>;
+                  })}</div>
 
-                {/* expression */}
-                <input className="expression-box" readOnly value={expression} placeholder={T.buildEq} />
+                  <input className="expression-box" readOnly value={expression} placeholder={T.buildEq} />
 
-                <div className="action-row">
-                  <button className="equal-btn glass-btn" onClick={() => { playSound("click"); setExpression(() => ""); setLastWasNumber(false); setLastWasSqrt(false); }}>
-                    {T.delete}
-                  </button>
-                  <button className="equal-btn glass-btn" onClick={() => { playSound("click"); checkAnswer(); }} disabled={digits.some((d) => !expression.includes(String(d)))}>
-                    {T.submit}
-                  </button>
-                </div>
+                  <div className="action-row">
+                    <button className="equal-btn glass-btn" onClick={() => { playSoundInternal("click"); setExpression((p) => p.slice(0, -1)); setLastWasNumber(false); }}>{T.delete}</button>
+                    <button className="equal-btn glass-btn" onClick={checkAnswer} disabled={digits.some((d) => !expression.includes(String(d)))}>{T.submit}</button>
+                    <button className="skip-btn glass-btn" onClick={() => { playSoundInternal("click"); socket.emit("skipTurn", { mode, nickname }); setIsMyTurn(false); setRunning(false); setTimeLeft(mode === "hard" ? 30 : 60); setExpression(""); }}>⏭️ Skip Turn</button>
+                  </div>
+                </>
+              )}
+            </div>
 
-                <div className="reactions">
-                  <button onClick={() => socket.emit("reaction", { mode, emoji: "👏", nickname })}>👏</button>
-                  <button onClick={() => socket.emit("reaction", { mode, emoji: "😮", nickname })}>😮</button>
-                  <button onClick={() => socket.emit("reaction", { mode, emoji: "😭", nickname })}>😭</button>
-                  <button onClick={() => socket.emit("reaction", { mode, emoji: "🔥", nickname })}>🔥</button>
-                </div>
-              </>
-            )}
-
-            {/* popups */}
             {resultPopup && resultPopup !== "endRound" && (
               <motion.div className={`popup ${resultPopup === "invalid" ? "invalid" : ""}`} initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 120 }}>
                 {resultPopup === "correct" && <h2>{T.correct}</h2>}
-                {resultPopup === "wrong" && (
-                  <>
-                    <h2>{T.wrong}</h2>
-                    <p className="solution-text">
-                      💡 {T.solution}: <br />
-                      <span className="solution-highlight">{solutionExpr}</span>
-                    </p>
-                  </>
-                )}
-                {resultPopup === "timeout" && (
-                  <>
-                    <h2>{T.timeout}</h2>
-                    <p className="solution-text">
-                      💡 {T.solution}: <br />
-                      <span className="solution-highlight">{solutionExpr}</span>
-                    </p>
-                  </>
-                )}
+                {resultPopup === "wrong" && (<><h2>{T.wrong}</h2><p className="solution-text">💡 {T.solution}: <br /><span className="solution-highlight">{solutionExpr}</span></p></>)}
+                {resultPopup === "timeout" && (<><h2>{T.timeout}</h2><p className="solution-text">💡 {T.solution}: <br /><span className="solution-highlight">{solutionExpr}</span></p></>)}
                 {resultPopup === "invalid" && <h2>{T.invalidExpr}</h2>}
-                {resultPopup === "gameover" && (
-                  <>
-                    <h2>💀 Game Over</h2>
-                    {endByName && <p className="solution-text">🛑 {lang === "th" ? "จบเกมโดย" : lang === "zh" ? "由以下玩家结束：" : "Ended by"}: <span className="solution-highlight"> {endByName}</span></p>}
-                    <p className="solution-text">Not enough players to continue.</p>
-                  </>
-                )}
+                {resultPopup === "gameover" && (<><h2>💀 Game Over</h2><p className="solution-text">Not enough players to continue.</p></>)}
 
                 {autoResumeCount !== null && <p className="resume-count">Resuming next turn in <span className="highlight">{autoResumeCount}</span>s...</p>}
 
-                {autoResumeCount === null && (
-                  <div className="popup-btns">
-                    <button onClick={() => { playSound("click"); startGame(mode); }}><FaRedo /> {T.playAgain}</button>
-                    <button onClick={() => { playSound("click"); stopTimer(); setPage("stats"); }}><FaSignOutAlt /> {T.exit}</button>
-                  </div>
-                )}
+                {autoResumeCount === null && (<div className="popup-btns"><button onClick={() => { playSoundInternal("click"); startGame(mode); }}><FaRedo /> {T.playAgain}</button><button onClick={() => { playSoundInternal("click"); stopTimer(); setPage("stats"); }}><FaSignOutAlt /> {T.exit}</button></div>)}
               </motion.div>
             )}
           </motion.div>
         )}
 
-        {/* endRound popup */}
-        {resultPopup === "endRound" && (
-          <motion.div className="popup" initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 120 }}>
-            <h2>🏁 End of Round {rounds}</h2>
-            <p className="solution-text">{lang === "th" ? "รอบนี้จบแล้ว! พร้อมเริ่มรอบถัดไปหรือไม่?" : "Round complete! Ready for the next one?"}</p>
-            <div className="popup-btns">
-              <button onClick={() => { playSound("click"); socket.emit("resumeGame", { mode }); setResultPopup(null); }}><FaRedo /> {T.playAgain}</button>
-              <button onClick={() => { playSound("click"); socket.emit("playerLeftGame", { nickname, mode }); setPage("login"); }}><FaSignOutAlt /> {T.exit}</button>
-            </div>
-          </motion.div>
-        )}
-
-        {/* stats page */}
         {page === "stats" && (
           <motion.div key="stats" {...fade} className="stats-page">
             <div className="stats-card">
               <h2 className="stats-title">{T.stats}</h2>
-
-              {(() => {
-                const entries = Object.entries(scores ?? {});
-                const turnOrder = Array.isArray(gameState?.turnOrder) ? gameState.turnOrder : [];
-                const waiters = Array.isArray(waitingPlayers) ? waitingPlayers : [];
-                const basePlayers = [...new Set([...turnOrder, ...waiters, nickname].filter(Boolean))];
-                const rowsRaw = entries.length > 0 ? entries : basePlayers.map((name) => [name, 0]);
-                if (rowsRaw.length === 0) {
-                  return <p style={{ textAlign: "center", marginTop: 12 }}>{lang === "th" ? "ยังไม่มีผู้เล่น" : lang === "zh" ? "暂无玩家" : "No players yet"}</p>;
-                }
-                const sorted = [...rowsRaw].sort((a, b) => b[1] - a[1]);
-                const [winName, winScore] = sorted[0];
-                return (
-                  <>
-                    <div className="winner-banner" style={{ margin: "8px 0 16px", textAlign: "center" }}>
-                      <h3 style={{ margin: 0 }}>🏆 {lang === "th" ? "ผู้ชนะ" : lang === "zh" ? "获胜者" : "Winner"}: <span className="highlight">{winName}</span></h3>
-                      <p style={{ marginTop: 6 }}>{lang === "th" ? "คะแนน" : lang === "zh" ? "分数" : "Score"}: <strong>{winScore}</strong></p>
-                    </div>
-
-                    <div className="scoreboard glass-card" style={{ padding: 16 }}>
-                      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: "0 8px" }}>
-                        <thead>
-                          <tr><th style={{ textAlign: "left" }}>{lang === "th" ? "ผู้เล่น" : lang === "zh" ? "玩家" : "Player"}</th><th style={{ textAlign: "right" }}>{lang === "th" ? "คะแนน" : lang === "zh" ? "分数" : "Score"}</th></tr>
-                        </thead>
-                        <tbody>
-                          {sorted.map(([name, sc]) => (
-                            <tr key={name}>
-                              <td>{name === nickname ? <span className="you-label" style={{ marginRight: 6 }}>{lang === "th" ? "คุณ" : lang === "zh" ? "你" : "You"}</span> : null}{name}{name === winName && <span style={{ marginLeft: 8 }}>🏆</span>}</td>
-                              <td style={{ textAlign: "right" }}><strong>{sc}</strong></td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </>
-                );
-              })()}
-
-              <div className="stats-actions" style={{ marginTop: 16 }}>
-                <button className="main-btn" onClick={() => { playSound("click"); setPage("mode"); }}><FaArrowLeft /> {T.back}</button>
+              <div className="scoreboard glass-card" style={{ padding: 16 }}>
+                <table style={{ width: "100%" }}>
+                  <thead><tr><th>{lang === "th" ? "ผู้เล่น" : lang === "zh" ? "玩家" : "Player"}</th><th style={{ textAlign: "right" }}>{lang === "th" ? "คะแนน" : lang === "zh" ? "分数" : "Score"}</th></tr></thead>
+                  <tbody>{Object.entries(scores || {}).map(([name, sc]) => (<tr key={name}><td>{name === nickname ? <span className="you-label">{lang === "th" ? "คุณ" : lang === "zh" ? "你" : "You"}</span> : null}{name}</td><td style={{ textAlign: "right" }}><strong>{sc}</strong></td></tr>))}</tbody>
+                </table>
               </div>
+              <div className="stats-actions" style={{ marginTop: 16 }}><button className="main-btn" onClick={() => { playSoundInternal("click"); setPage("mode"); }}><FaArrowLeft /> {T.back}</button></div>
             </div>
           </motion.div>
         )}
