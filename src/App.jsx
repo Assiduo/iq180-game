@@ -705,9 +705,22 @@ export default function App() {
     if (socket && socket.connected) socket.emit("endGame", { mode, by: nickname, reason: "endedByPlayer" });
   };
 
-  const currentTheme = themes[theme] || themes.galaxyBlue;
-  const fade = { initial: { opacity: 0, y: 20 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -20 } };
-  const isHost = (gameState?.host === nickname) || (Array.isArray(gameState?.turnOrder) && gameState.turnOrder[0] === nickname);
+  // /* ---------- Small UI helpers ---------- */
+  // const isHost = (gameState?.turnOrder?.[0] === nickname) || false;
+  // function playSound(type) { try { playSoundInternal(type); } catch { } }
+  // function playSoundInternal(type) {
+  //   if (muted) return;
+  //   if (type === "click") clickRef.current?.play();
+  //   if (type === "correct") correctRef.current?.play();
+  //   if (type === "wrong") wrongRef.current?.play();
+  //   if (type === "timeout") timeoutRef.current?.play();
+  }
+
+  /* ---------- Render (kept structure similar to original) ---------- */
+  // const fade = { initial: { opacity: 0, y: 20 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -20 } };
+  // const currentTheme = themes[theme] || themes.galaxyBlue;
+  // const fade = { initial: { opacity: 0, y: 20 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -20 } };
+  // const isHost = (gameState?.host === nickname) || (Array.isArray(gameState?.turnOrder) && gameState.turnOrder[0] === nickname);
 
   /* ---------------- Render (UI) ---------------- */
   return (
