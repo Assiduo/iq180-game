@@ -220,6 +220,19 @@ body {
   transform: scale(1.08);
 }
 
+.intro-page {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+}
+
+.intro-page .glass-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+}
+
 /* MODE PAGE -------------------------------------------------------*/
 .mode-page h1 {
   color: #fff;
