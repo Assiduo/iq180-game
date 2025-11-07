@@ -30,7 +30,7 @@ import { io } from "socket.io-client";
 
 /* ====== CONFIG ====== */
 // Replace with your server IP if needed:
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:4000";
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://10.203.146.192:4000";
 const socket = io(SERVER_URL, { autoConnect: true, transports: ["websocket", "polling"] });
 
 
@@ -233,15 +233,15 @@ export default function App() {
     else if (!bgmRef.current.playing()) bgmRef.current.play();
   }, [volume, muted]);
 
-  const playSound = (type) => {
-    if (muted) return;
-    if (type === "click") clickRef.current?.play();
-    if (type === "correct") correctRef.current?.play();
-    if (type === "wrong") wrongRef.current?.play();
-    if (type === "timeout") timeoutRef.current?.play();
-  };
+  // const playSound = (type) => {
+  //   if (muted) return;
+  //   if (type === "click") clickRef.current?.play();
+  //   if (type === "correct") correctRef.current?.play();
+  //   if (type === "wrong") wrongRef.current?.play();
+  //   if (type === "timeout") timeoutRef.current?.play();
+  // };
 
-  const playSoundInternal = (t) => { try { playSound(t); } catch (e) {} };
+  // const playSoundInternal = (t) => { try { playSound(t); } catch (e) {} };
 
   /* ---------------- App state ---------------- */
   const [page, setPage] = useState("login");
@@ -706,21 +706,19 @@ export default function App() {
   };
 
   // /* ---------- Small UI helpers ---------- */
-  // const isHost = (gameState?.turnOrder?.[0] === nickname) || false;
-  // function playSound(type) { try { playSoundInternal(type); } catch { } }
-  // function playSoundInternal(type) {
-  //   if (muted) return;
-  //   if (type === "click") clickRef.current?.play();
-  //   if (type === "correct") correctRef.current?.play();
-  //   if (type === "wrong") wrongRef.current?.play();
-  //   if (type === "timeout") timeoutRef.current?.play();
+  function playSound(type) { try { playSoundInternal(type); } catch { } }
+  function playSoundInternal(type) {
+    if (muted) return;
+    if (type === "click") clickRef.current?.play();
+    if (type === "correct") correctRef.current?.play();
+    if (type === "wrong") wrongRef.current?.play();
+    if (type === "timeout") timeoutRef.current?.play();
   }
 
   /* ---------- Render (kept structure similar to original) ---------- */
-  // const fade = { initial: { opacity: 0, y: 20 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -20 } };
-  // const currentTheme = themes[theme] || themes.galaxyBlue;
-  // const fade = { initial: { opacity: 0, y: 20 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -20 } };
-  // const isHost = (gameState?.host === nickname) || (Array.isArray(gameState?.turnOrder) && gameState.turnOrder[0] === nickname);
+  const fade = { initial: { opacity: 0, y: 20 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -20 } };
+  const currentTheme = themes[theme] || themes.galaxyBlue;
+  const isHost = (gameState?.host === nickname) || (Array.isArray(gameState?.turnOrder) && gameState.turnOrder[0] === nickname);
 
   /* ---------------- Render (UI) ---------------- */
   return (
