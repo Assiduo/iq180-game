@@ -250,6 +250,32 @@ const [isMyTurn, setIsMyTurn] = useState(false); // ตอนนี้เป็�
 
 const [autoResumeCount, setAutoResumeCount] = useState(null);
 
+/* ======= EMOJI / REACTIONS ======= */
+const [reactions, setReactions] = useState({}); // { nickname: { emoji, ts } }
+const [latestEmojiPopup, setLatestEmojiPopup] = useState(null); // { emoji, from }
+const emojiTimeoutsRef = useRef({});
+
+const sendEmoji = (emoji) => {
+  try { playSound("click"); } catch {}
+  if (!nickname) return;
+  const payload = { nickname, emoji, ts: Date.now() };
+  // local echo
+  setReactions((prev) => ({ ...prev, [nickname]: { emoji, ts: payload.ts } }));
+  setLatestEmojiPopup({ emoji, from: nickname });
+  setTimeout(() => setLatestEmojiPopup(null), 1600);
+  // auto-clear local after 5s
+  if (emojiTimeoutsRef.current[nickname]) clearTimeout(emojiTimeoutsRef.current[nickname]);
+  emojiTimeoutsRef.current[nickname] = setTimeout(() => {
+    setReactions((prev) => {
+      const next = { ...prev };
+      delete next[nickname];
+      return next;
+    });
+    delete emojiTimeoutsRef.current[nickname];
+  }, 5000);
+
+  if (socket && socket.connected) socket.emit("playerEmoji", payload);
+};
 
 /* 🕒 TIMER (Client-side synced with Player 1, global for all players) */
 const [baseTime, setBaseTime] = useState(null);
@@ -257,309 +283,10 @@ const [timeLeft, setTimeLeft] = useState(60);
 const [running, setRunning] = useState(false);
 const timerRef = useRef(null);
 
-/* ✅ เมื่อถึงตาเราเล่น */
-socket.on("yourTurn", ({ mode }) => {
-  console.log("🎯 It's your turn!");
-  setIsMyTurn(true);
-
-  // 🧩 ตรวจว่าตานี้เป็นตาแรกหรือไม่ (ยังไม่มี rounds)
-  if (rounds === 0 && digits.length > 0) {
-    console.log("🧩 First turn — using server-provided problem");
-  } else {
-    // ตาอื่นให้สร้างโจทย์ใหม่
-    const gameData = generateProblem(mode);
-    setDigits(gameData.digits);
-    setOperators(gameData.operators);
-    setDisabledOps(gameData.disabledOps);
-    setTarget(gameData.target);
-    setMode(gameData.mode);
-  }
-
-  // ตั้ง base time และเริ่ม timer (เฉพาะตอนที่ได้รับ sync แล้ว)
-  const now = Date.now();
-  setBaseTime(now);
-  setTimeLeft(60);
-  setRunning(true);
-
-  // ถ้าเราเป็น host → เริ่ม timer sync
-  if (gameState?.turnOrder?.[0] === nickname && rounds > 0) {
-    const startTime = Date.now();
-    socket.emit("syncTimer", { mode, startTime });
-    console.log("🕒 Host started global timer:", new Date(startTime).toLocaleTimeString());
-  }
-});
-
-/* 🕛 รับเวลาจาก host เพื่อ sync (ทุกคนรวมถึงคนรอ) */
-socket.on("syncTimer", ({ mode, startTime }) => {
-  console.log(`🕛 Synced timer from host: ${new Date(startTime).toLocaleTimeString()}`);
-
-  // ทุกคนใช้ baseTime เดียวกัน
-  setBaseTime(startTime);
-  const elapsed = Math.floor((Date.now() - startTime) / 1000);
-  const remain = Math.max(60 - elapsed, 0);
-
-  setTimeLeft(remain);
-  setRunning(true);
-});
-
-/* 🔁 เมื่อสลับเทิร์น ให้หยุด timer ชั่วคราว */
-socket.on("turnSwitch", (data) => {
-  console.log("🔁 Turn switched:", data);
-  setGameState((prev) => ({
-    ...prev,
-    currentTurn: data.nextTurn,
-  }));
-
-  // ✅ อัปเดตรอบจาก server
-  if (data.round !== undefined) {
-    setRounds(data.round);
-    console.log(`📦 Updated Round from server: ${data.round}`);
-  }
-
-  setIsMyTurn(data.nextTurn === nickname);
-  setRunning(false);
-});
+/* ================= existing top-level socket handlers removed here
+   (we keep event binding inside the useEffect below to avoid duplicates) */
 
 
-/* 🕒 จับเวลาแบบ global ทุก client (รวมถึงคนรอ) */
-useEffect(() => {
-  if (!running || baseTime === null) return;
-
-  const tick = () => {
-    const elapsed = Math.floor((Date.now() - baseTime) / 1000);
-    const remaining = Math.max(60 - elapsed, 0);
-    setTimeLeft(remaining);
-
-    // ถ้าเวลาเหลือ 0 → หมดเวลา
-    if (remaining <= 0) {
-      clearInterval(timerRef.current);
-      setRunning(false);
-      playSound("timeout");
-    
-      // ✅ ใช้โจทย์ล่าสุดจาก ref (กันค่า timeout ก่อนหน้าค้าง)
-      const { digits, target, disabledOps } = problemRef.current;
-      const sol = findSolution(digits, target, disabledOps);
-      setSolutionExpr(sol || "No valid solution found");
-    
-      // ✅ เปิด popup หลังตั้ง solutionExpr แล้ว
-      setResultPopup("timeout");
-
-      // แจ้ง server ว่าหมดเวลา
-      socket.emit("answerResult", {
-        nickname,
-        result: "timeout",
-        correct: false,
-        score,
-        round: rounds + 1,
-        mode,
-      });
-
-      // Auto resume 3 วินาที
-      let count = 3;
-      setAutoResumeCount(count);
-      const countdown = setInterval(() => {
-        count -= 1;
-        setAutoResumeCount(count);
-        if (count <= 0) {
-          clearInterval(countdown);
-          setAutoResumeCount(null);
-          setResultPopup(null);
-          if (isMyTurn) {
-            socket.emit("resumeGame", { mode });
-            setIsMyTurn(false);
-          }
-          
-        }
-      }, 1000);
-    }
-  };
-
-  timerRef.current = setInterval(tick, 1000);
-  return () => clearInterval(timerRef.current);
-}, [running, baseTime]);
-
-/* ✅ CHECK ANSWER (Smart Validation) */
-const checkAnswer = () => {
-  try {
-    const expr = expression.trim();
-
-    // 🧩 Validation
-    if (!/\d/.test(expr)) {
-      setResultPopup("invalid");
-      return;
-    }
-    if (/^[+\-×÷*/)]/.test(expr)) {
-      setResultPopup("invalid");
-      return;
-    }
-    if (/[+\-×÷*/(]$/.test(expr)) {
-      setResultPopup("invalid");
-      return;
-    }
-
-    // 🧮 Evaluate
-    const clean = expr
-      .replace(/×/g, "*")
-      .replace(/÷/g, "/")
-      .replace(/\^/g, "**")
-      .replace(/√(\d+|\([^()]+\))/g, "Math.sqrt($1)");
-
-    const result = eval(clean);
-    const correct = Number.isFinite(result) && Math.abs(result - target) < 1e-9;
-
-    // ✅ แสดง popup + เสียง
-    if (correct) {
-      playSound("correct");
-      setScore((s) => s + 1);
-      setResultPopup("correct");
-  
-      setSolutionExpr(""); // ไม่ต้องแสดงเฉลยเพราะตอบถูก
-    } else {
-      playSound("wrong");
-      setResultPopup("wrong");
-
-      // 🧠 หาเฉลยอัตโนมัติ
-      const sol = findSolution(digits, target, disabledOps);
-      setSolutionExpr(sol || "No valid solution found");
-    }
-
-    // 🧾 เก็บประวัติ
-    setHistory((h) => [...h, { round: rounds + 1, result, ok: correct }]);
-
-    // 🔄 ส่งผลลัพธ์ไป server
-    if (socket && socket.connected) {
-      socket.emit("answerResult", {
-        nickname,
-        mode,
-        result,
-        correct,
-        score: correct ? score + 1 : score,
-        round: rounds + 1,
-      });
-    }
-
-    // ⏳ เริ่ม auto resume
-    let count = 3;
-    setAutoResumeCount(count);
-    const timer = setInterval(() => {
-      count -= 1;
-      setAutoResumeCount(count);
-      if (count <= 0) {
-        clearInterval(timer);
-        setAutoResumeCount(null);
-        setResultPopup(null);
-        if (isMyTurn) {
-          socket.emit("resumeGame", { mode });
-          setIsMyTurn(false);
-        }
-        
-      }
-    }, 1000);
-  } catch (err) {
-    console.error("❌ Expression error:", err);
-    setResultPopup("invalid");
-  }
-};
-// 🛑 STOP TIMER (safe)
-const stopTimer = () => {
-  if (timerRef.current) {
-    clearInterval(timerRef.current);
-    timerRef.current = null;
-  }
-};
-
-// 👑 HOST CHECK (คงไว้เสมอ เผื่อ JSX ใช้)
-const isHost = gameState?.turnOrder?.[0] === nickname;
-
-// 🧨 END GAME FOR ALL (ทุกคนเห็น Game Over popup)
-const endGameForAll = () => {
-  // กันกดซ้ำ/กันยิงซ้ำขณะอยู่ popup อยู่แล้ว
-  if (resultPopup === "gameover") return;
-
-  try {
-    playSound("click");
-  } catch {}
-
-  stopTimer();
-  setRunning(false);
-
-  // ให้เราเห็น popupทันที
-  setResultPopup("gameover");
-
-  // แจ้ง server ให้ broadcast ไปทั้งห้อง (ถ้า server รองรับ)
-  if (socket && socket.connected) {
-    socket.emit("endGame", { mode, by: nickname, reason: "endedByPlayer" });
-  }
-};
-
-// 🚪 LEAVE GAME (เผื่อ JSX ที่ไหนยังเรียกอยู่ จะไม่พังหน้าดำ)
-// ทำให้พฤติกรรม "ออก" ก็เจอ popup เหมือนคนอื่น (ตามที่คุณต้องการ)
-const leaveGame = () => {
-  try {
-    playSound("click");
-  } catch {}
-
-  stopTimer();
-  setRunning(false);
-
-  // เห็น popup game over แบบเดียวกัน
-  setResultPopup("gameover");
-
-  // แจ้ง server ว่าเราออก (server อาจจบเกมถ้าเหลือคนน้อย)
-  if (socket && socket.connected) {
-    socket.emit("playerLeftGame", { nickname, mode });
-  }
-};
-
-
-  /* 🧠 หาวิธีเฉลยที่ถูกต้องตามเครื่องหมายที่เปิดใช้ */
-  const findSolution = (digits, target, disabledOps = []) => {
-    const ops = ["+", "-", "*", "/"].filter(
-      (op) => !disabledOps.includes(op === "*" ? "×" : op === "/" ? "÷" : op)
-    );
-
-    const permute = (arr) => {
-      if (arr.length <= 1) return [arr];
-      const result = [];
-      arr.forEach((val, i) => {
-        const rest = [...arr.slice(0, i), ...arr.slice(i + 1)];
-        permute(rest).forEach((perm) => result.push([val, ...perm]));
-      });
-      return result;
-    };
-
-    const numberPerms = permute(digits);
-
-    for (const numArr of numberPerms) {
-      for (let o1 of ops)
-        for (let o2 of ops)
-          for (let o3 of ops)
-            for (let o4 of ops) {
-              const expr = `${numArr[0]}${o1}${numArr[1]}${o2}${numArr[2]}${o3}${numArr[3]}${o4}${numArr[4]}`;
-              try {
-                const result = eval(expr);
-                if (Number.isInteger(result) && result === target) {
-                  return expr
-                    .replace(/\*/g, "×")
-                    .replace(/\//g, "÷");
-                }
-              } catch {}
-            }
-    }
-    return null;
-  };
-
-
-  /* ✨ Transition presets */
-  const fade = {
-    initial: { opacity: 0, y: 20 },
-    animate: { opacity: 1, y: 0 },
-    exit: { opacity: 0, y: -20 },
-  };
-
-  const currentTheme = themes[theme];
-
-/* 🧩 SOCKET.IO CLIENT CONNECTION */
 useEffect(() => {
   if (!socket) return;
 
@@ -805,6 +532,31 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
     }
   });
 
+  /* ===== NEW: receive emoji reactions from server ===== */
+  socket.on("playerEmoji", (payload) => {
+    if (!payload || !payload.nickname || !payload.emoji) return;
+    const from = payload.nickname;
+    const emoji = payload.emoji;
+    const ts = payload.ts || Date.now();
+
+    // set reaction
+    setReactions((prev) => ({ ...prev, [from]: { emoji, ts } }));
+
+    // transient center popup
+    setLatestEmojiPopup({ emoji, from });
+    setTimeout(() => setLatestEmojiPopup(null), 1600);
+
+    // schedule auto-clear after 5s (per-player)
+    if (emojiTimeoutsRef.current[from]) clearTimeout(emojiTimeoutsRef.current[from]);
+    emojiTimeoutsRef.current[from] = setTimeout(() => {
+      setReactions((prev) => {
+        const next = { ...prev };
+        delete next[from];
+        return next;
+      });
+      delete emojiTimeoutsRef.current[from];
+    }, 5000);
+  });
 
   // 🧹 cleanup (สำคัญมาก ป้องกัน event ซ้ำ)
   return () => {
@@ -818,10 +570,254 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
     socket.off("yourTurn");
     socket.off("answerResult");
     socket.off("playerLeft");
+    socket.off("playerEmoji");
+
+    // clear scheduled per-player emoji timeouts
+    Object.values(emojiTimeoutsRef.current || {}).forEach((t) => clearTimeout(t));
+    emojiTimeoutsRef.current = {};
   };
 }, [nickname, page, mode]);
 
-  /* 🌌 MAIN UI */
+
+/* 🕒 Global tick effect */
+useEffect(() => {
+  if (!running || baseTime === null) return;
+
+  const tick = () => {
+    const elapsed = Math.floor((Date.now() - baseTime) / 1000);
+    const remaining = Math.max(60 - elapsed, 0);
+    setTimeLeft(remaining);
+
+    // ถ้าเวลาเหลือ 0 → หมดเวลา
+    if (remaining <= 0) {
+      clearInterval(timerRef.current);
+      setRunning(false);
+      playSound("timeout");
+    
+      // ✅ ใช้โจทย์ล่าสุดจาก ref (กันค่า timeout ก่อนหน้าค้าง)
+      const { digits, target, disabledOps } = problemRef.current;
+      const sol = findSolution(digits, target, disabledOps);
+      setSolutionExpr(sol || "No valid solution found");
+    
+      // ✅ เปิด popup หลังตั้ง solutionExpr แล้ว
+      setResultPopup("timeout");
+
+      // แจ้ง server ว่าหมดเวลา
+      socket.emit("answerResult", {
+        nickname,
+        result: "timeout",
+        correct: false,
+        score,
+        round: rounds + 1,
+        mode,
+      });
+
+      // Auto resume 3 วินาที
+      let count = 3;
+      setAutoResumeCount(count);
+      const countdown = setInterval(() => {
+        count -= 1;
+        setAutoResumeCount(count);
+        if (count <= 0) {
+          clearInterval(countdown);
+          setAutoResumeCount(null);
+          setResultPopup(null);
+          if (isMyTurn) {
+            socket.emit("resumeGame", { mode });
+            setIsMyTurn(false);
+          }
+          
+        }
+      }, 1000);
+    }
+  };
+
+  timerRef.current = setInterval(tick, 1000);
+  return () => clearInterval(timerRef.current);
+}, [running, baseTime]);
+
+/* ✅ CHECK ANSWER (Smart Validation) */
+const checkAnswer = () => {
+  try {
+    const expr = expression.trim();
+
+    // 🧩 Validation
+    if (!/\d/.test(expr)) {
+      setResultPopup("invalid");
+      return;
+    }
+    if (/^[+\-×÷*/)]/.test(expr)) {
+      setResultPopup("invalid");
+      return;
+    }
+    if (/[+\-×÷*/(]$/.test(expr)) {
+      setResultPopup("invalid");
+      return;
+    }
+
+    // 🧮 Evaluate
+    const clean = expr
+      .replace(/×/g, "*")
+      .replace(/÷/g, "/")
+      .replace(/\^/g, "**")
+      .replace(/√(\d+|\([^()]+\))/g, "Math.sqrt($1)");
+
+    const result = eval(clean);
+    const correct = Number.isFinite(result) && Math.abs(result - target) < 1e-9;
+
+    // ✅ แสดง popup + เสียง
+    if (correct) {
+      playSound("correct");
+      setScore((s) => s + 1);
+      setResultPopup("correct");
+  
+      setSolutionExpr(""); // ไม่ต้องแสดงเฉลยเพราะตอบถูก
+    } else {
+      playSound("wrong");
+      setResultPopup("wrong");
+
+      // 🧠 หาเฉลยอัตโนมัติ
+      const sol = findSolution(digits, target, disabledOps);
+      setSolutionExpr(sol || "No valid solution found");
+    }
+
+    // 🧾 เก็บประวัติ
+    setHistory((h) => [...h, { round: rounds + 1, result, ok: correct }]);
+
+    // 🔄 ส่งผลลัพธ์ไป server
+    if (socket && socket.connected) {
+      socket.emit("answerResult", {
+        nickname,
+        mode,
+        result,
+        correct,
+        score: correct ? score + 1 : score,
+        round: rounds + 1,
+      });
+    }
+
+    // ⏳ เริ่ม auto resume
+    let count = 3;
+    setAutoResumeCount(count);
+    const timer = setInterval(() => {
+      count -= 1;
+      setAutoResumeCount(count);
+      if (count <= 0) {
+        clearInterval(timer);
+        setAutoResumeCount(null);
+        setResultPopup(null);
+        if (isMyTurn) {
+          socket.emit("resumeGame", { mode });
+          setIsMyTurn(false);
+        }
+        
+      }
+    }, 1000);
+  } catch (err) {
+    console.error("❌ Expression error:", err);
+    setResultPopup("invalid");
+  }
+};
+// 🛑 STOP TIMER (safe)
+const stopTimer = () => {
+  if (timerRef.current) {
+    clearInterval(timerRef.current);
+    timerRef.current = null;
+  }
+};
+
+// 👑 HOST CHECK (คงไว้เสมอ เผื่อ JSX ใช้)
+const isHost = gameState?.turnOrder?.[0] === nickname;
+
+// 🧨 END GAME FOR ALL (ทุกคนเห็น Game Over popup)
+const endGameForAll = () => {
+  // กันกดซ้ำ/กันยิงซ้ำขณะอยู่ popup อยู่แล้ว
+  if (resultPopup === "gameover") return;
+
+  try {
+    playSound("click");
+  } catch {}
+
+  stopTimer();
+  setRunning(false);
+
+  // ให้เราเห็น popupทันที
+  setResultPopup("gameover");
+
+  // แจ้ง server ให้ broadcast ไปทั้งห้อง (ถ้า server รองรับ)
+  if (socket && socket.connected) {
+    socket.emit("endGame", { mode, by: nickname, reason: "endedByPlayer" });
+  }
+};
+
+// 🚪 LEAVE GAME (เผื่อ JSX ที่ไหนยังเรียกอยู่ จะไม่พังหน้าดำ)
+// ทำให้พฤติกรรม "ออก" ก็เจอ popup เหมือนคนอื่น (ตามที่คุณต้องการ)
+const leaveGame = () => {
+  try {
+    playSound("click");
+  } catch {}
+
+  stopTimer();
+  setRunning(false);
+
+  // เห็น popup game over แบบเดียวกัน
+  setResultPopup("gameover");
+
+  // แจ้ง server ว่าเราออก (server อาจจบเกมถ้าเหลือคนน้อย)
+  if (socket && socket.connected) {
+    socket.emit("playerLeftGame", { nickname, mode });
+  }
+};
+
+
+  /* 🧠 หาวิธีเฉลยที่ถูกต้องตามเครื่องหมายที่เปิดใช้ */
+  const findSolution = (digits, target, disabledOps = []) => {
+    const ops = ["+", "-", "*", "/"].filter(
+      (op) => !disabledOps.includes(op === "*" ? "×" : op === "/" ? "÷" : op)
+    );
+
+    const permute = (arr) => {
+      if (arr.length <= 1) return [arr];
+      const result = [];
+      arr.forEach((val, i) => {
+        const rest = [...arr.slice(0, i), ...arr.slice(i + 1)];
+        permute(rest).forEach((perm) => result.push([val, ...perm]));
+      });
+      return result;
+    };
+
+    const numberPerms = permute(digits);
+
+    for (const numArr of numberPerms) {
+      for (let o1 of ops)
+        for (let o2 of ops)
+          for (let o3 of ops)
+            for (let o4 of ops) {
+              const expr = `${numArr[0]}${o1}${numArr[1]}${o2}${numArr[2]}${o3}${numArr[3]}${o4}${numArr[4]}`;
+              try {
+                const result = eval(expr);
+                if (Number.isInteger(result) && result === target) {
+                  return expr
+                    .replace(/\*/g, "×")
+                    .replace(/\//g, "÷");
+                }
+              } catch {}
+            }
+    }
+    return null;
+  };
+
+
+  /* ✨ Transition presets */
+  const fade = {
+    initial: { opacity: 0, y: 20 },
+    animate: { opacity: 1, y: 0 },
+    exit: { opacity: 0, y: -20 },
+  };
+
+  const currentTheme = themes[theme];
+
+/* 🌌 MAIN UI */
   return (
     <motion.div
       key={theme}
@@ -835,6 +831,33 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
       animate={{ opacity: 1 }}
       transition={{ duration: 0.8 }}
     >
+      {/* center popup for latest emoji */}
+      {latestEmojiPopup && (
+        <motion.div
+          initial={{ scale: 0.6, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0.6, opacity: 0 }}
+          transition={{ duration: 0.28 }}
+          style={{
+            position: "fixed",
+            left: "50%",
+            top: "36%",
+            transform: "translateX(-50%)",
+            zIndex: 60,
+            pointerEvents: "none",
+            textAlign: "center",
+            background: "rgba(0,0,0,0.35)",
+            padding: "12px 18px",
+            borderRadius: 12,
+          }}
+        >
+          <div style={{ fontSize: 44 }}>{latestEmojiPopup.emoji}</div>
+          <div style={{ fontSize: 12, marginTop: 6, opacity: 0.85 }}>
+            {latestEmojiPopup.from}
+          </div>
+        </motion.div>
+      )}
+
       {/* 🌍 TOP CONTROLS */}
       <div className="top-controls">
         {/* 🌐 Language */}
@@ -1117,6 +1140,12 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
   <motion.div key="mode" className="mode-page" {...fade}>
     <h2 className="big-player">
       {T.playerName}: <span>{nickname}</span>
+      {/* show reaction if present */}
+      {reactions[nickname] && (
+        <span style={{ marginLeft: 10, fontSize: 22, opacity: 0.95 }}>
+          {reactions[nickname].emoji}
+        </span>
+      )}
     </h2>
 
     {/* 👥 รายชื่อผู้เล่นออนไลน์ */}
@@ -1135,6 +1164,9 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
                 </span>
               ) : (
                 p
+              )}
+              {reactions[p] && (
+                <span style={{ marginLeft: 8, fontSize: 18 }}>{reactions[p].emoji}</span>
               )}
             </li>
           ))}
@@ -1208,7 +1240,10 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
       {waitingPlayers.length > 0 ? (
         <ul>
           {waitingPlayers.map((p, i) => (
-            <li key={i}>{p}</li>
+            <li key={i}>
+              {p}
+              {reactions[p] && <span style={{ marginLeft: 8 }}>{reactions[p].emoji}</span>}
+            </li>
           ))}
         </ul>
       ) : (
@@ -1282,6 +1317,11 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
   {/* 🧑‍💼 แสดงเฉพาะชื่อเรา */}
   <h2 className="big-player">
     {T.playerName}: <span>{nickname}</span>
+    {reactions[nickname] && (
+      <span style={{ marginLeft: 10, fontSize: 22, opacity: 0.95 }}>
+        {reactions[nickname].emoji}
+      </span>
+    )}
   </h2>
 
     {/* 🔘 Game controls */}
@@ -1306,6 +1346,54 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
       <button className="glass-btn" onClick={leaveGame}>
         <FaSignOutAlt /> {lang === "th" ? "จบเกม" : lang === "zh" ? "结束游戏" : "End Game"}
       </button>
+
+      {/* Emoji palette / button */}
+      <div style={{ position: "relative" }}>
+        <button
+          className="glass-btn"
+          onClick={() => setDropdownOpen(dropdownOpen === "emoji" ? null : "emoji")}
+          title="Send emoji"
+        >
+          😊
+        </button>
+
+        {dropdownOpen === "emoji" && (
+          <div
+            className="dropdown-menu"
+            style={{
+              right: 0,
+              left: "auto",
+              padding: 8,
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
+              width: 220,
+              zIndex: 30,
+            }}
+          >
+            {["😊", "🔥", "👏", "😮", "😂", "👍", "❤️", "🎉"].map((e) => (
+              <button
+                key={e}
+                style={{
+                  fontSize: 20,
+                  padding: 8,
+                  borderRadius: 8,
+                  minWidth: 40,
+                  border: "none",
+                  background: "rgba(255,255,255,0.03)",
+                  cursor: "pointer",
+                }}
+                onClick={() => {
+                  sendEmoji(e);
+                  setDropdownOpen(null);
+                }}
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* จบเกมทั้งห้อง (โชว์เฉพาะโฮสต์) */}
       {isHost && (
@@ -1357,6 +1445,12 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
       >
         {timeLeft > 0 ? `${timeLeft}s` : "00s"}
       </h1>
+      {/* show reaction of current turn if present */}
+      {gameState?.currentTurn && reactions[gameState.currentTurn] && (
+        <div style={{ marginTop: 6 }}>
+          <strong>{reactions[gameState.currentTurn].emoji}</strong>
+        </div>
+      )}
     </div>
   )}
 </div>
@@ -1698,6 +1792,7 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
                           </span>
                         ) : null}
                         {name}
+                        {reactions[name] && <span style={{ marginLeft: 8 }}>{reactions[name].emoji}</span>}
                         {name === winName && <span style={{ marginLeft: 8 }}>🏆</span>}
                       </td>
                       <td style={{ textAlign: "right" }}>

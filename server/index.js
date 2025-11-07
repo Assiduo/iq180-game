@@ -438,6 +438,26 @@ io.on("connection", (socket) => {
     player.isOnline = false;
     updatePlayerList();
   });
+
+  socket.on("playerEmoji", (payload) => {
+    // payload = { nickname, emoji, ts }
+    if (!payload || !payload.nickname || !payload.emoji) return;
+
+    // determine the mode/room of this socket (if known)
+    const p = players[socket.id];
+    const room = p?.mode || null;
+
+    // Broadcast to the room if we have it; otherwise broadcast to all connected clients
+    if (room) {
+      io.to(room).emit("playerEmoji", payload);
+      console.log(`💬 [emoji] ${payload.nickname} -> room ${room}: ${payload.emoji}`);
+    } else {
+      // fallback: emit globally
+      io.emit("playerEmoji", payload);
+      console.log(`💬 [emoji] ${payload.nickname} -> all: ${payload.emoji}`);
+    }
+  });
+
 });
 
 /* 🟢 START SERVER ---------------------------------------------------- */
