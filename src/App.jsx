@@ -899,7 +899,8 @@ export default function App() {
               <div className="scoreboard glass-card" style={{ padding: 16 }}>
                 <table style={{ width: "100%" }}>
                   <thead><tr><th>{lang === "th" ? "ผู้เล่น" : lang === "zh" ? "玩家" : "Player"}</th><th style={{ textAlign: "right" }}>{lang === "th" ? "คะแนน" : lang === "zh" ? "分数" : "Score"}</th></tr></thead>
-                  <tbody>{Object.entries(scores || {}).map(([name, sc]) => (<tr key={name}><td>{name === nickname ? <span className="you-label">{lang === "th" ? "คุณ" : lang === "zh" ? "你" : "You"}</span> : null}{name}</td><td style={{ textAlign: "right" }}><strong>{sc}</strong></td></tr>))}</tbody>
+                  <tbody>{Object.entries(scores || {}).map(([name, sc]) => (<tr key={name}><td>{name === nickname ? (<span className="you-label">{lang === "th" ? "คุณ" : lang === "zh" ? "你" : "You"}</span>) : 
+                  (name)}</td><td style={{ textAlign: "right" }}><strong>{sc}</strong></td></tr>))}</tbody>
                 </table>
               </div>
 
