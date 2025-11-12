@@ -11,7 +11,6 @@
 
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Howl } from "howler";
 import {
   FaArrowLeft,
   FaArrowRight,
@@ -23,11 +22,13 @@ import {
 } from "react-icons/fa";
 import "./App.css";
 
-import clickSoundFile from "./sounds/click.mp3";
-import correctSoundFile from "./sounds/correct.mp3";
-import wrongSoundFile from "./sounds/wrong.mp3";
-import timeoutSoundFile from "./sounds/timeout.mp3";
-import bgmFile from "./sounds/bgm.mp3";
+import useSound from "./hooks/useSound";
+import LanguageDropdown from "./components/controls/LanguageDropdown";
+import ThemeDropdown from "./components/controls/ThemeDropdown";
+import VolumeDropdown from "./components/controls/VolumeDropdown";
+
+import LoginPage from "./components/LoginPage";
+import IntroPage from "./components/IntroPage"
 
 import { io } from "socket.io-client";
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:4000";
@@ -168,45 +169,8 @@ export default function App() {
   const [waitingPlayers, setWaitingPlayers] = useState([]);
 
   /* 🔊 SOUND ENGINE */
-  const [muted, setMuted] = useState(false);
-  const [volume, setVolume] = useState(0.4);
-  const clickSound = new Howl({ src: [clickSoundFile], volume: 0.6 });
-  const correctSound = new Howl({ src: [correctSoundFile], volume: 0.7 });
-  const wrongSound = new Howl({ src: [wrongSoundFile], volume: 0.7 });
-  const timeoutSound = new Howl({ src: [timeoutSoundFile], volume: 0.6 });
-  const [bgm] = useState(() => new Howl({ src: [bgmFile], loop: true }));
-  // ✅ คะแนนของทุกผู้เล่นในเกม (ชื่อ → คะแนน)
-  const [scores, setScores] = useState({});
-
-  useEffect(() => {
-    bgm.volume(volume);
-    if (volume === 0) setMuted(true);
-    if (!muted && !bgm.playing()) bgm.play();
-    if (muted) bgm.pause();
-  }, [muted, volume, bgm]);
-
-  const toggleMute = () => {
-    if (muted) {
-      setMuted(false);
-      setVolume(0.4);
-      bgm.play();
-    } else {
-      setMuted(true);
-      setVolume(0);
-      bgm.pause();
-    }
-  };
-
-  const playSound = (type) => {
-    if (muted) return;
-    const sounds = {
-      click: clickSound,
-      correct: correctSound,
-      wrong: wrongSound,
-      timeout: timeoutSound,
-    };
-    sounds[type]?.play();
-  };
+// replace existing sound state with hook:
+const { play, muted, volume, setVolume, toggleMute } = useSound({ initialVolume: 0.4 });
 
  /* ⚙️ GAME STATE */
 const [page, setPage] = useState("login");
@@ -256,7 +220,7 @@ const [latestEmojiPopup, setLatestEmojiPopup] = useState(null); // { emoji, from
 const emojiTimeoutsRef = useRef({});
 
 const sendEmoji = (emoji) => {
-  try { playSound("click"); } catch {}
+  try { play("click"); } catch {}
   if (!nickname) return;
   const payload = { nickname, emoji, ts: Date.now() };
   // local echo
@@ -285,8 +249,6 @@ const timerRef = useRef(null);
 
 /* ================= existing top-level socket handlers removed here
    (we keep event binding inside the useEffect below to avoid duplicates) */
-
-
 useEffect(() => {
   if (!socket) return;
 
@@ -578,7 +540,6 @@ setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
   };
 }, [nickname, page, mode]);
 
-
 /* 🕒 Global tick effect */
 useEffect(() => {
   if (!running || baseTime === null) return;
@@ -592,7 +553,7 @@ useEffect(() => {
     if (remaining <= 0) {
       clearInterval(timerRef.current);
       setRunning(false);
-      playSound("timeout");
+      play("timeout");
     
       // ✅ ใช้โจทย์ล่าสุดจาก ref (กันค่า timeout ก่อนหน้าค้าง)
       const { digits, target, disabledOps } = problemRef.current;
@@ -667,13 +628,13 @@ const checkAnswer = () => {
 
     // ✅ แสดง popup + เสียง
     if (correct) {
-      playSound("correct");
+      play("correct");
       setScore((s) => s + 1);
       setResultPopup("correct");
   
       setSolutionExpr(""); // ไม่ต้องแสดงเฉลยเพราะตอบถูก
     } else {
-      playSound("wrong");
+      play("wrong");
       setResultPopup("wrong");
 
       // 🧠 หาเฉลยอัตโนมัติ
@@ -735,7 +696,7 @@ const endGameForAll = () => {
   if (resultPopup === "gameover") return;
 
   try {
-    playSound("click");
+    play("click");
   } catch {}
 
   stopTimer();
@@ -754,7 +715,7 @@ const endGameForAll = () => {
 // ทำให้พฤติกรรม "ออก" ก็เจอ popup เหมือนคนอื่น (ตามที่คุณต้องการ)
 const leaveGame = () => {
   try {
-    playSound("click");
+    play("click");
   } catch {}
 
   stopTimer();
@@ -768,7 +729,6 @@ const leaveGame = () => {
     socket.emit("playerLeftGame", { nickname, mode });
   }
 };
-
 
   /* 🧠 หาวิธีเฉลยที่ถูกต้องตามเครื่องหมายที่เปิดใช้ */
   const findSolution = (digits, target, disabledOps = []) => {
@@ -860,279 +820,93 @@ const leaveGame = () => {
 
       {/* 🌍 TOP CONTROLS */}
       <div className="top-controls">
-        {/* 🌐 Language */}
-        <div className="lang-dropdown">
-          <button
-            className="control-btn"
-            onClick={() =>
-              setDropdownOpen(dropdownOpen === "lang" ? null : "lang")
-            }
-          >
-            <FaGlobe />
-          </button>
-          {dropdownOpen === "lang" && (
-            <div className="dropdown-menu">
-              {Object.keys(texts).map((code) => (
-                <div
-                  key={code}
-                  className={`dropdown-item ${
-                    lang === code ? "active" : ""
-                  }`}
-                  onClick={() => {
-                    setLang(code);
-                    setDropdownOpen(null);
-                  }}
-                >
-                  {code.toUpperCase()}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <LanguageDropdown
+          dropdownOpen={dropdownOpen}
+          setDropdownOpen={setDropdownOpen}
+          texts={texts}
+          lang={lang}
+          setLang={setLang}
+        />
 
-        {/* 🎨 Theme */}
-        <div className="theme-dropdown">
-          <button
-            className="control-btn"
-            onClick={() =>
-              setDropdownOpen(dropdownOpen === "theme" ? null : "theme")
-            }
-          >
-            <FaPalette />
-          </button>
-          {dropdownOpen === "theme" && (
-            <div className="dropdown-menu">
-              {Object.entries(themes).map(([key, val]) => (
-                <div
-                  key={key}
-                  className={`dropdown-item ${
-                    theme === key ? "active" : ""
-                  }`}
-                  onClick={() => {
-                    setTheme(key);
-                    setDropdownOpen(null);
-                  }}
-                >
-                  {val.name}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <ThemeDropdown
+          dropdownOpen={dropdownOpen}
+          setDropdownOpen={setDropdownOpen}
+          themes={themes}
+          theme={theme}
+          setTheme={setTheme}
+        />
 
-        {/* 🔊 Volume */}
-        <div className="volume-dropdown">
-          <button
-            className="control-btn"
-            onClick={() =>
-              setDropdownOpen(dropdownOpen === "volume" ? null : "volume")
-            }
-          >
-            <FaVolumeUp />
-          </button>
-          {dropdownOpen === "volume" && (
-            <div className="dropdown-menu volume-menu">
-              <div className="volume-control">
-                <FaVolumeUp
-                  className="volume-icon"
-                  onClick={toggleMute}
-                  style={{ cursor: "pointer" }}
-                />
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  value={muted ? 0 : volume}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    setVolume(val);
-                    setMuted(val === 0);
-                  }}
-                  className="volume-slider"
-                />
-              </div>
-            </div>
-          )}
-        </div>
+        <VolumeDropdown
+          dropdownOpen={dropdownOpen}
+          setDropdownOpen={setDropdownOpen}
+          volume={volume}
+          muted={muted}
+          setVolume={setVolume}
+          toggleMute={toggleMute}
+        />
       </div>
       
-{/* 🔙 Back Button */}
-{page !== "login" && (
-  <button
-    className="back-btn"
-    onClick={() => {
-      playSound("click");
+      {/* 🔙 Back Button */}
+      {page !== "login" && (
+        <button
+          className="back-btn"
+          onClick={() => {
+            play("click");
 
-      if (page === "game") {
-        stopTimer();
+            if (page === "game") {
+              stopTimer();
 
-        // ✅ ใช้ mode จาก gameState ถ้ามี (กัน state ค้าง)
-        const activeMode = gameState?.mode || mode;
+              // ✅ ใช้ mode จาก gameState ถ้ามี (กัน state ค้าง)
+              const activeMode = gameState?.mode || mode;
 
-        socket.emit("playerLeftGame", {
-          nickname,
-          mode: activeMode,
-        });
+              socket.emit("playerLeftGame", {
+                nickname,
+                mode: activeMode,
+              });
 
-        setRunning(false);
-        setIsMyTurn(false);
-        setPage("mode"); // กลับไปหน้าเลือกโหมด
-      } 
-      else if (page === "waiting" || page === "mode") {
-        socket.emit("leaveLobby", nickname);
-        socket.disconnect();
-        setPage("login");
-      } 
-      else {
-        setPage("login");
-      }
-    }}
-  >
-    <FaArrowLeft />
-  </button>
-)}
-
+              setRunning(false);
+              setIsMyTurn(false);
+              setPage("mode"); // กลับไปหน้าเลือกโหมด
+            } 
+            else if (page === "waiting" || page === "mode") {
+              socket.emit("leaveLobby", nickname);
+              socket.disconnect();
+              setPage("login");
+            } 
+            else {
+              setPage("login");
+            }
+          }}
+        >
+          <FaArrowLeft />
+        </button>
+      )}
 
       {/* ⚡ PAGE SWITCHER */}
       <AnimatePresence mode="wait">
         {/* LOGIN PAGE ------------------------------------------------ */}
         {page === "login" && (
-          <motion.div key="login" className="login-page" {...fade}>
-            <div className="glass-card">
-              <h1 className="title">{T.title}</h1>
-              <p className="subtitle">{T.subtitle}</p>
-              <input
-                type="text"
-                placeholder={T.enterName}
-                value={nickname}
-                onChange={(e) => setNickname(e.target.value)}
-              />
-<button
-  className="main-btn"
-  onClick={() => {
-    if (nickname.trim()) {
-      playSound("click");
-      socket.emit("setNickname", nickname); // แจ้ง server ว่า online
-      setPage("intro"); // ← go to intro so demo is available
-    }
-  }}
->
-  {T.start} <FaArrowRight />
-</button>
-
-
-            </div>
-          </motion.div>
+          <LoginPage
+            T={T}
+            nickname={nickname}
+            setNickname={setNickname}
+            play={play}
+            socket={socket}
+            setPage={setPage}
+            fade={fade}
+          />
         )}
 
         {/* INTRO PAGE (integrated) ------------------------------------------------ */}
         {page === "intro" && (
-          <motion.div key="intro" className="intro-page" {...fade}>
-            <div className="glass-card" style={{ padding: "2.5rem", maxWidth: 900, margin: "2rem auto" }}>
-              <h1 style={{ fontSize: "2.2rem", marginBottom: "0.6rem", color: "white" }}>
-                {T.welcome},{" "}
-                <span style={{ textDecoration: "underline", color: "white" }}>{nickname}</span>!
-              </h1>
-              <p style={{ marginBottom: "1.2rem", color: "rgba(255,255,255,0.85)" }}>
-                {lang === "th"
-                  ? "ยินดีต้อนรับ! นี่คือวิธีการเล่นและเคล็ดลับก่อนเริ่มเกม"
-                  : lang === "zh"
-                  ? "欢迎！以下是开始游戏前的玩法说明与提示"
-                  : "Welcome! Here’s how to play and a few tips before you start."}
-              </p>
-
-              {/* How to Play */}
-              <div style={{ background: "rgba(255,255,255,0.03)", padding: "1rem 1.25rem", borderRadius: 14, marginBottom: "1.2rem" }}>
-                <h2 style={{ marginBottom: "0.6rem" }}>
-                  {lang === "th" ? "วิธีการเล่น" : lang === "zh" ? "玩法说明" : "How to Play"}
-                </h2>
-                <ul style={{ textAlign: "left", lineHeight: 1.8, fontSize: "1rem", color: "rgba(255,255,255,0.9)" }}>
-                  <li>🎯 {lang === "th" ? "เป้าหมาย: สร้างสมการจากตัวเลขให้ได้ค่าตามเป้าหมาย" : lang === "zh" ? "目标：使用提供的数字构建等式以匹配目标数字" : "Goal: Build an equation from the digits to match the target number."}</li>
-                  <li>➕➖✖️➗ {lang === "th" ? "เลือกเครื่องหมายและคลิกตัวเลขเพื่อสร้างสมการ" : lang === "zh" ? "选择运算符并点击数字来构建等式" : "Choose operators and click digits to form the equation."}</li>
-                  <li>⏰ {lang === "th" ? "เวลา: 60 วินาทีต่อเทิร์น (โหมด Genius อาจสั้นลง)" : lang === "zh" ? "时间：每回合 60 秒（天才模式可能更短）" : "Time: 60 seconds per turn (Genius mode may be shorter)."}</li>
-                  <li>✅❌ {lang === "th" ? "ระบบจะตรวจคำตอบและให้คะแนนอัตโนมัติ" : lang === "zh" ? "系统会自动检查答案并计分" : "The system auto-checks answers and updates score."}</li>
-                  <li>👥 {lang === "th" ? "โหมดผู้เล่นหลายคน: ระบบจะสลับตาระหว่างผู้เล่น" : lang === "zh" ? "多人模式：系统会自动切换回合" : "Multiplayer: turns automatically switch between players."}</li>
-                </ul>
-              </div>
-
-              {/* Tips */}
-              <div style={{ background: "rgba(255,255,255,0.02)", padding: "0.8rem 1rem", borderRadius: 12, marginBottom: "1rem" }}>
-                <h3 style={{ marginBottom: "0.4rem" }}>{lang === "th" ? "เคล็ดลับ" : lang === "zh" ? "提示" : "Tips"}</h3>
-                <p style={{ color: "rgba(255,255,255,0.85)" }}>
-                  {lang === "th"
-                    ? "ลองเริ่มจากการจับคู่ง่าย ๆ และใช้การจัดลำดับเครื่องหมายเพื่อหลีกเลี่ยงการหารด้วยศูนย์"
-                    : lang === "zh"
-                    ? "先从简单组合尝试，注意避免除以 0"
-                    : "Start with simple combinations; avoid division by zero and try operator order to match target."}
-                </p>
-              </div>
-
-              {/* Practice Demo Button */}
-              <div style={{ textAlign: "center", marginBottom: "1rem" }}>
-                <button
-                  onClick={() => { playSound("click"); setShowDemo(p => !p); setDemoExpression(""); setDemoResult(null); setDemoUsedNums([false, false, false]); }}
-                  className="glass-btn"
-                  style={{ padding: "0.6rem 1rem", borderRadius: "0.8rem", background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)", color: "white", fontSize: "1rem", cursor: "pointer" }}
-                >
-                  🧮 {showDemo ? (lang === "th" ? "ปิดโหมดฝึกซ้อม" : lang === "zh" ? "关闭练习模式" : "Close Practice Mode") : (lang === "th" ? "เริ่มฝึกซ้อม (Demo)" : lang === "zh" ? "开始练习 (Demo)" : "Start Demo")}
-                </button>
-              </div>
-
-              {/* Demo Practice Section */}
-              {showDemo && (
-                <div className="glass-card" style={{ margin: "1.2rem auto", padding: "1.5rem", width: "90%", maxWidth: 500, borderRadius: "1rem", background: "rgba(255,255,255,0.05)" }}>
-                  <h3 style={{ marginBottom: "0.8rem", fontSize: "1.4rem" }}>
-                    {lang === "th" ? "ใช้ตัวเลขทั้งสามเพื่อให้ได้ผลลัพธ์ = 17" : lang === "zh" ? "使用这三个数字使结果 = 17" : "Use all three numbers to make result = 17"}
-                  </h3>
-
-                  {/* Numbers */}
-                  <div style={{ display: "flex", gap: "0.5rem", justifyContent: "center", marginBottom: "0.8rem" }}>
-                    {[3, 8, 3].map((num, idx) => (
-                      <button key={idx}
-                        onClick={() => { if (demoUsedNums[idx]) return; if (/[+\-×÷]$/.test(demoExpression) || demoExpression === "") { setDemoExpression(p => p + num); const c = [...demoUsedNums]; c[idx] = true; setDemoUsedNums(c); } else playSound("error"); }}
-                        disabled={demoUsedNums[idx]}
-                        style={{ padding: "0.6rem 1rem", fontSize: "1.2rem", borderRadius: "0.6rem", background: demoUsedNums[idx] ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.1)", color: demoUsedNums[idx] ? "gray" : "white", border: "1px solid rgba(255,255,255,0.2)", cursor: demoUsedNums[idx] ? "not-allowed" : "pointer" }}
-                      >{num}</button>
-                    ))}
-                  </div>
-
-                  {/* Operators */}
-                  <div style={{ display: "flex", gap: "0.5rem", justifyContent: "center", marginBottom: "0.8rem" }}>
-                    {["+", "-", "×", "÷"].map(op => (
-                      <button key={op}
-                        onClick={() => { if (!demoExpression || /[+\-×÷]$/.test(demoExpression)) return playSound("error"); setDemoExpression(p => p + op); }}
-                        style={{ padding: "0.5rem 0.8rem", fontSize: "1.2rem", borderRadius: "0.6rem", background: "rgba(255,255,255,0.1)", color: "#00bfff", border: "1px solid rgba(255,255,255,0.15)" }}
-                      >{op}</button>
-                    ))}
-                  </div>
-
-                  <input value={demoExpression} readOnly placeholder={lang === "th" ? "สร้างสมการที่นี่..." : lang === "zh" ? "在此构建等式..." : "Build your equation here..."} style={{ width: "100%", padding: "0.5rem", fontSize: "1rem", borderRadius: "0.5rem", marginBottom: "0.8rem", textAlign: "center" }} />
-
-                  <div style={{ display: "flex", gap: "0.5rem", justifyContent: "center", marginBottom: "0.5rem" }}>
-                    <button onClick={() => setDemoExpression(p => p.slice(0, -1))} style={{ padding: "0.5rem 1rem", borderRadius: "0.6rem", background: "rgba(255,255,255,0.1)", color: "white", border: "1px solid rgba(255,255,255,0.2)" }}>{T.delete}</button>
-                    <button onClick={() => { const used = demoUsedNums.filter(Boolean).length; if (used < 3 || /[+\-×÷]$/.test(demoExpression)) return setDemoResult("❌"), playSound("error"); try { const val = eval(demoExpression.replace(/×/g, "*").replace(/÷/g, "/")); setDemoResult(val); } catch { setDemoResult("❌"); } }} style={{ padding: "0.5rem 1rem", borderRadius: "0.6rem", background: "#00bfff", color: "white", border: "none" }}>{T.submit}</button>
-                    <button onClick={() => { setDemoExpression(""); setDemoUsedNums([false, false, false]); setDemoResult(null); }} style={{ padding: "0.5rem 1rem", borderRadius: "0.6rem", background: "rgba(255,255,255,0.05)", color: "white", border: "1px solid rgba(255,255,255,0.15)" }}>🔄 {lang === "th" ? "รีเซ็ต" : lang === "zh" ? "重置" : "Reset"}</button>
-                  </div>
-
-                  {demoResult !== null && (
-                    <p style={{ marginTop: "1rem", fontSize: "1.2rem" }}>
-                      {lang === "th" ? "ผลลัพธ์:" : lang === "zh" ? "结果:" : "Result:"}{" "}
-                      <span style={{ color: demoResult === 17 ? "#00ff88" : demoResult === "❌" ? "#ff4444" : "white", fontWeight: "bold" }}>{demoResult}</span>
-                      {demoResult === 17 && <span style={{ marginLeft: "0.4rem" }}>✅</span>}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 10 }}>
-                <button className="secondary-btn" onClick={() => { playSound("click"); setPage("login"); }}>← {T.back}</button>
-                <button className="secondary-btn" onClick={() => { playSound("click"); setPage("mode"); }}>
-                  {lang === "th" ? "ไปเลือกโหมด" : lang === "zh" ? "进入模式选择" : "Continue to Game Mode"} <FaArrowRight />
-                </button>
-              </div>
-            </div>
-          </motion.div>
+          <IntroPage
+            T={T}
+            nickname={nickname}
+            lang={lang}
+            play={play}
+            setPage={setPage}
+            fade={fade}
+          />
         )}
 
 {/* MODE PAGE ------------------------------------------------ */}
@@ -1188,7 +962,7 @@ const leaveGame = () => {
       <button
         className="mode-btn glass-btn"
         onClick={() => {
-          playSound("click");
+          play("click");
           setMode("easy");
           socket.emit("joinGame", { nickname, mode: "easy" });
           setPage("waiting");
@@ -1200,7 +974,7 @@ const leaveGame = () => {
       <button
         className="mode-btn glass-btn"
         onClick={() => {
-          playSound("click");
+          play("click");
           setMode("hard");
           socket.emit("joinGame", { nickname, mode: "hard" });
           setPage("waiting");
@@ -1276,7 +1050,7 @@ const leaveGame = () => {
 <button
   className="secondary-btn"
   onClick={() => {
-    playSound("click");
+    play("click");
     socket.emit("leaveGame", { nickname, mode }); // ออกจากห้อง แต่ยัง online
     setPage("mode"); // กลับไปหน้าเลือกโหมด
   }}
@@ -1493,7 +1267,7 @@ const leaveGame = () => {
             disabled={lastWasNumber || used}
             className={`digit-btn ${used ? "used" : ""}`}
             onClick={() => {
-              playSound("click");
+              play("click");
               if (!used && !lastWasNumber) {
                 setExpression((p) => p + n);
                 setLastWasNumber(true);
@@ -1547,7 +1321,7 @@ const leaveGame = () => {
         className={className}
         onClick={() => {
           if (isDisabled) return; // ไม่ให้กดถ้า logic หรือ locked
-          playSound("click");
+          play("click");
 
           setExpression((prev) => prev + op);
 
@@ -1579,7 +1353,7 @@ const leaveGame = () => {
       <button
         className="equal-btn glass-btn"
         onClick={() => {
-          playSound("click");
+          play("click");
           setExpression((p) => p.slice(0, -1));
           setLastWasNumber(false);
           setLastWasSqrt(false);
@@ -1590,7 +1364,7 @@ const leaveGame = () => {
       <button
         className="equal-btn glass-btn"
         onClick={() => {
-          playSound("click");
+          play("click");
           checkAnswer();
         }}
         disabled={digits.some((d) => !expression.includes(String(d)))}
@@ -1666,7 +1440,7 @@ const leaveGame = () => {
       <div className="popup-btns">
         <button
           onClick={() => {
-            playSound("click");
+            play("click");
             startGame(mode);
           }}
         >
@@ -1674,7 +1448,7 @@ const leaveGame = () => {
         </button>
         <button
           onClick={() => {
-            playSound("click");
+            play("click");
             stopTimer();
             setPage("stats");
           }}
@@ -1705,7 +1479,7 @@ const leaveGame = () => {
     <div className="popup-btns">
       <button
         onClick={() => {
-          playSound("click");
+          play("click");
           socket.emit("resumeGame", { mode });
           setResultPopup(null);
         }}
@@ -1714,7 +1488,7 @@ const leaveGame = () => {
       </button>
       <button
         onClick={() => {
-          playSound("click");
+          play("click");
           socket.emit("playerLeftGame", { nickname, mode });
           setPage("login");
         }}
@@ -1812,7 +1586,7 @@ const leaveGame = () => {
         <button
           className="main-btn"
           onClick={() => {
-            playSound("click");
+            play("click");
             setPage("mode");
           }}
         >
@@ -1824,9 +1598,6 @@ const leaveGame = () => {
 )}
 
       </AnimatePresence>
-
-
-
     </motion.div>
   );
 }
