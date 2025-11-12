@@ -1,5 +1,3 @@
-// src/config/texts.js
-
 export const texts = {
     en: {
         title: "IQ180",
@@ -93,8 +91,6 @@ export const texts = {
 };
 
 /**
- * Get translation table for a language.
- * Fallback to English if unsupported.
  * @param {string} lang - language code ('en', 'th', 'zh')
  */
 export function getTexts(lang = "en") {

@@ -1,5 +1,3 @@
-// src/config/themes.js
-
 export const themes = {
     galaxyBlue: {
         name: "Galaxy Neon Blue",
@@ -28,8 +26,6 @@ export const themes = {
 };
 
 /**
- * Get current theme object by name.
- * Fallback to 'galaxyBlue' if not found.
  */
 export function getTheme(name = "galaxyBlue") {
     return themes[name] || themes.galaxyBlue;

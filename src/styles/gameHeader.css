@@ -1,14 +1,9 @@
-/* ===============================
-🎮 GAME HEADER LAYOUT
-=============================== */
 
-/* Whole header wrapper */
 .game-header {
   position: relative;
   text-align: center;
 }
 
-/* Big player name line */
 .big-player {
   font-size: 1.6rem;
   font-weight: 600;
@@ -16,7 +11,6 @@
   color: var(--text, #fff);
 }
 
-/* Bottom control bar (fixed) */
 .bottom-controls {
   position: fixed;
   left: 50%;
@@ -34,48 +28,35 @@
   background: rgba(0, 0, 0, 0.35);
 }
 
-/* ensure the dropdown's parent is the positioning context */
 .emoji-dropdown {
-  position: relative;        /* CRUCIAL - anchors the .emoji-menu */
+  position: relative;        
   display: inline-block;
-  z-index: 200;              /* keep it above other siblings */
+  z-index: 200;            
 }
 
-/* make sure container won't clip (if you control parent, add there too) */
 .bottom-controls {
-  overflow: visible;         /* allow popup to escape parent box */
+  overflow: visible;      
 }
 
-/* emoji popup: appear above the button, centered horizontally */
 .emoji-menu {
-  position: absolute;
-  bottom: calc(100% + 8px);  /* 8px gap above the button */
-  left: 50%;
-  transform: translateX(-50%) scale(0.98);
-  transform-origin: 50% 100%; /* animate from bottom-center */
-  min-width: 180px;
-  max-width: 280px;
+  position: fixed; 
+  transform-origin: 50% 100%;
   padding: 8px 10px;
-  display: flex;
   gap: 8px;
+  display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  z-index: 1000;
   border-radius: 10px;
   background: rgba(0, 0, 0, 0.56);
   backdrop-filter: blur(6px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  transition: transform 160ms cubic-bezier(.2,.9,.2,1), opacity 160ms;
-  opacity: 1;
 }
 
-/* small show animation when inserted into DOM */
 .emoji-menu.show {
   transform: translateX(-50%) scale(1);
   opacity: 1;
 }
 
-/* emoji buttons */
 .emoji-btn {
   font-size: 20px;
   padding: 6px;
@@ -88,12 +69,10 @@
 }
 .emoji-btn:hover { transform: translateY(-3px); background: rgba(255,255,255,0.06); }
 
-/* small responsive tweak so the popup doesn't overflow viewport */
 @media (max-width: 420px) {
   .emoji-menu { left: 50%; width: calc(100vw - 32px); transform: translateX(-50%); }
 }
 
-/* Game stats layout */
 .game-stats {
   display: flex;
   flex-direction: column;
@@ -102,7 +81,6 @@
   margin-top: 10px;
 }
 
-/* Waiting header (when not your turn) */
 .waiting-header {
   margin-top: 10px;
   text-align: center;

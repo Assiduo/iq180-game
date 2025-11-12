@@ -1,4 +1,3 @@
-// src/hooks/useGameTimer.js
 import { useEffect, useRef, useState } from "react";
 import { findSolution } from "../utils/solver";
 

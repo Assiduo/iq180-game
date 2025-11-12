@@ -2,23 +2,12 @@ import { useEffect } from "react";
 import { io } from "socket.io-client";
 import { generateProblem } from "../utils/problemGenerator";
 
-// ✅ Connect to backend server
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:4000";
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://10.203.228.80:4000";
 const socket = io(SERVER_URL, {
   autoConnect: true,
   transports: ["websocket", "polling"],
 });
-//ถ้าเปลี่ยน router แม้ใช้ wifi ชื่อเดียวกัน ก็ต้องใส่ ip ใหม่
-// เข้า Terminal เครื่อง แล้วพิมพ์:
-// "ipconfig" (Window)
-// "ifconfig | grep inet" (Mac)
-// แล้วหา 	inet 10.201.213.149 netmask 0xffff8000
 
-
-/**
- * Custom hook for game socket events
- * Handles all socket.io listeners and cleanup automatically
- */
 export default function useGameSocket({
   nickname,
   mode,
@@ -55,42 +44,47 @@ export default function useGameSocket({
   setLatestEmojiPopup,
   emojiTimeoutsRef,
   problemRef,
-  stopTimer,
+  stopTimer, // use the one passed in (do NOT shadow it)
 }) {
   useEffect(() => {
     if (!socket) return;
 
-    // ✅ CONNECT
+    const now = () => new Date().toISOString();
+
+    // CONNECT
     socket.on("connect", () => {
-      console.log("🟢 Connected to server");
-      if (page === "mode" && nickname.trim()) {
+      console.log(now(), "🟢 Connected to server", { id: socket.id });
+      if (page === "mode" && nickname?.trim()) {
         socket.emit("setNickname", nickname);
-        console.log(`✅ ${nickname} marked as online`);
+        console.log(now(), `✅ ${nickname} marked as online`);
       }
     });
 
-    // ✅ PLAYER LIST
+    // PLAYER LIST
     socket.on("playerList", (list) => {
-      console.log("👥 Players online:", list);
+      console.log(now(), "👥 Players online:", list);
       setPlayerList(list);
     });
 
-    // ✅ WAITING LIST
+    // WAITING LIST
     socket.on("waitingList", (data) => {
       if (data.mode === mode) {
-        console.log(`🕹️ Waiting list for ${mode}:`, data.players);
+        console.log(now(), `🕹️ Waiting list for ${mode}:`, data.players);
         setWaitingPlayers(data.players);
       }
     });
 
-    // ✅ READY STATE
+    // READY STATE
     socket.on("canStart", (data) => {
-      if (data.mode === mode) setCanStart(data.canStart);
+      if (data.mode === mode) {
+        console.log(now(), `✅ canStart for ${data.mode}:`, data.canStart);
+        setCanStart(data.canStart);
+      }
     });
 
-    // ✅ PRE-GAME COUNTDOWN
+    // PRE-GAME COUNTDOWN
     socket.on("preGameStart", (data) => {
-      console.log("⏳ Pre-game starting:", data);
+      console.log(now(), "⏳ Pre-game starting:", data);
       setPreGameInfo({
         mode: data.mode,
         starter: data.starter,
@@ -109,26 +103,40 @@ export default function useGameSocket({
       }, 1000);
     });
 
-    // ✅ GAME START
+    // GAME START (server authoritative)
     socket.on("gameStart", (data) => {
-      console.log("🚀 Game started from server:", data);
+      console.log(now(), "🚀 gameStart from server:", data);
+
       setDigits(data.digits || []);
       setOperators(data.operators || []);
       setDisabledOps(data.disabledOps || []);
       setTarget(data.target || 0);
       setMode(data.mode || "easy");
 
+      // store server problem in problemRef (server canonical)
       problemRef.current = {
         digits: data.digits || [],
         target: data.target || 0,
         disabledOps: data.disabledOps || [],
+        solutionExpr: data.solutionExpr,
+        solutionResult: data.solutionResult,
       };
 
+      // Save server-provided solution expr (UI can hide)
+      setSolutionExpr(data.solutionExpr ?? "");
+      if (data.solutionResult !== undefined) setSolution(data.solutionResult);
+
+      // Ensure gameState contains authoritative round and target
       setGameState((prev) => ({
         ...prev,
         ...data,
-        target: data.target || 0, // ✅ ensure target is synced in gameState
+        target: data.target || 0,
+        round: data.round ?? prev.round ?? 0,
+        currentTurn: data.currentTurn ?? prev.currentTurn,
       }));
+
+      // keep rounds in sync deterministically
+      setRounds((prev) => (data.round ?? prev ?? 0));
 
       const list =
         Array.isArray(data.players) && data.players.length > 0
@@ -153,34 +161,47 @@ export default function useGameSocket({
       setLastWasNumber(false);
       setLastWasSqrt(false);
       setResultPopup(null);
-      setSolution(null);
       setScore(0);
-      setRounds(0);
+      // solution state already set above
     });
 
-    // ✅ NEW ROUND
+    // NEW ROUND (server authoritative)
     socket.on("newRound", (data) => {
-      console.log("🎯 New round data received:", data);
+      console.log(now(), "🎯 newRound received:", data);
 
-      // Fallback if target is missing
-      const newTarget = data.target ?? problemRef.current.target ?? 0;
+      // authoritative server target (fallback to existing problemRef if missing)
+      const newTarget = data.target ?? problemRef.current?.target ?? 0;
 
       setDigits(data.digits || []);
       setOperators(data.operators || []);
       setDisabledOps(data.disabledOps || []);
       setTarget(newTarget);
-      setRounds(data.round);
+
+      // Sync rounds deterministically with debug log
+      setRounds((prev) => {
+        const next = data.round ?? prev ?? 0;
+        console.log(now(), "→ setRounds:", { prev, next });
+        return next;
+      });
+
       setExpression("");
       setLastWasNumber(false);
       setResultPopup(null);
 
+      // store server problem as canonical
       problemRef.current = {
         digits: data.digits || [],
         target: newTarget,
         disabledOps: data.disabledOps || [],
+        solutionExpr: data.solutionExpr,
+        solutionResult: data.solutionResult,
       };
 
-      setSolutionExpr("");
+      // Save server-provided solution expr (UI can decide to show/hide)
+      setSolutionExpr(data.solutionExpr ?? "");
+      if (data.solutionResult !== undefined) setSolution(data.solutionResult);
+
+      setSolutionExpr(data.solutionExpr ?? "");
 
       // Reset timer
       const duration = data.mode === "hard" ? 30 : 60;
@@ -188,43 +209,73 @@ export default function useGameSocket({
       setBaseTime(Date.now());
       setRunning(true);
 
-      // ✅ Sync target with gameState
+      // Sync to gameState too (single source: gameState.round)
       setGameState((prev) => ({
         ...prev,
         ...data,
         target: newTarget,
+        round: data.round ?? prev.round ?? 0,
       }));
     });
 
-    // ✅ TURN SWITCH
+    // TURN SWITCH
     socket.on("turnSwitch", (data) => {
-      console.log("🔁 Turn switched:", data);
+      console.log(now(), "🔁 turnSwitch:", data);
       setGameState((prev) => ({
         ...prev,
         currentTurn: data.nextTurn,
+        // do not overwrite round with undefined; preserve prev if missing
         round: data.round ?? prev.round,
       }));
+
+      // keep local turns consistent
       setIsMyTurn(data.nextTurn === nickname);
 
       const duration = mode === "hard" ? 30 : 60;
       setTimeLeft(duration);
       setBaseTime(Date.now());
       setRunning(true);
+
+      // If turnSwitch also carries round, sync rounds
+      if (data.round !== undefined) {
+        setRounds(data.round);
+      }
     });
 
-    // ✅ GAMEOVER
+    // GAMEOVER
     socket.on("gameover", (data) => {
-      console.log("💀 Game over:", data);
-      setEndByName(data?.by || null);
+      console.log(now(), "💀 gameover:", data);
+      setEndByName(data?.by ?? null);
       setResultPopup("gameover");
-      stopTimer();
+      // call the external stopTimer (passed in), do not shadow it
+      if (typeof stopTimer === "function") stopTimer();
       setRunning(false);
     });
 
-    // ✅ YOUR TURN
-    socket.on("yourTurn", ({ mode }) => {
-      console.log("🧩 It's now your turn to generate a problem!");
-      const gameData = generateProblem(mode);
+    // YOUR TURN — client fallback only if server hasn't provided a problem
+    socket.on("yourTurn", ({ mode: serverMode }) => {
+      console.log(now(), "🧩 yourTurn event from server:", { serverMode });
+
+      // If server already provided a problem and stored it in problemRef, do NOT overwrite it.
+      const hasServerProblem = !!(problemRef.current && problemRef.current.target !== undefined && problemRef.current.target !== null);
+      if (hasServerProblem) {
+        console.log(now(), "ℹ️ Server problem already present — not generating locally.", problemRef.current);
+        // turn UI on
+        setIsMyTurn(true);
+        setPage("game");
+        setBaseTime(Date.now());
+        setRunning(true);
+        setExpression("");
+        setLastWasNumber(false);
+        setLastWasSqrt(false);
+        setResultPopup(null);
+        setSolution(null); // solution is already in problemRef if present
+        return;
+      }
+
+      // fallback: generate a local problem only if server didn't provide one
+      console.log(now(), "⚠️ No server problem found — generating fallback locally");
+      const gameData = generateProblem(serverMode);
 
       setDigits(gameData.digits);
       setOperators(gameData.operators);
@@ -236,6 +287,8 @@ export default function useGameSocket({
         digits: gameData.digits,
         target: gameData.target,
         disabledOps: gameData.disabledOps,
+        solutionExpr: gameData.expr,
+        solutionResult: gameData.target,
       };
 
       setBaseTime(Date.now());
@@ -248,44 +301,49 @@ export default function useGameSocket({
       setSolution(null);
       setPage("game");
 
-      // ✅ Update gameState for consistency
       setGameState((prev) => ({
         ...prev,
         currentTurn: nickname,
         target: gameData.target,
       }));
 
-      // ✅ Broadcast new problem to others (optional, if backend supports it)
-      socket.emit("newProblem", {
-        mode,
+      // optional: notify server of the fallback proposal (server needs to accept it)
+      socket.emit("newProblemProposal", {
+        mode: serverMode,
         digits: gameData.digits,
         operators: gameData.operators,
         disabledOps: gameData.disabledOps,
         target: gameData.target,
+        solutionExpr: gameData.expr,
+        solutionResult: gameData.target,
       });
     });
 
-    // ✅ ANSWER RESULT
     socket.on("answerResult", (data) => {
-      console.log("📩 Answer result:", data);
+      console.log(now(), "📩 answerResult:", data);
       setScores((prev) => {
         const next = { ...prev };
         if (!(data.nickname in next)) next[data.nickname] = 0;
         if (data.correct) next[data.nickname] += 1;
         return next;
       });
-      if (data.round !== undefined) setRounds(data.round);
+      if (data.round !== undefined) {
+        setRounds(data.round);
+        setGameState((prev) => ({ ...prev, round: data.round }));
+      }
+
+      if (data.solutionExpr !== undefined) setSolutionExpr(data.solutionExpr);
+      if (data.solutionResult !== undefined) setSolution(data.solutionResult);
     });
 
-    // ✅ PLAYER LEFT
     socket.on("playerLeft", (data) => {
-      console.log(`🚪 ${data.nickname} left ${data.mode}`);
+      console.log(now(), `🚪 playerLeft: ${data.nickname} left ${data.mode}`);
       if (data.mode === mode) {
         setWaitingPlayers((prev) => prev.filter((p) => p !== data.nickname));
       }
     });
 
-    // ✅ EMOJIS
+    // PLAYER EMOJI
     socket.on("playerEmoji", (payload) => {
       if (!payload || !payload.nickname || !payload.emoji) return;
       const { nickname: from, emoji, ts = Date.now() } = payload;
@@ -303,28 +361,13 @@ export default function useGameSocket({
       }, 5000);
     });
 
-    // ✅ CLEANUP
     return () => {
-      [
-        "connect",
-        "playerList",
-        "waitingList",
-        "canStart",
-        "preGameStart",
-        "gameStart",
-        "newRound",
-        "turnSwitch",
-        "yourTurn",
-        "answerResult",
-        "playerLeft",
-        "playerEmoji",
-        "gameover",
-      ].forEach((e) => socket.off(e));
-
+      socket.removeAllListeners();
       Object.values(emojiTimeoutsRef.current || {}).forEach((t) => clearTimeout(t));
       emojiTimeoutsRef.current = {};
+      console.log(now(), "🧹 cleaned up socket listeners & emoji timers");
     };
-  }, [nickname, page, mode]);
+  }, [nickname, page, mode, stopTimer]);
 
   return socket;
 }

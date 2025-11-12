@@ -1,4 +1,3 @@
-// src/components/game/ActiveTurn.jsx
 export default function ActiveTurn({
     T,
     play,
@@ -13,7 +12,6 @@ export default function ActiveTurn({
     setLastWasSqrt,
     checkAnswer,
 }) {
-    /* 🎯 Render active turn controls */
     return (
         <>
             {/* DIGITS */}

@@ -20,13 +20,12 @@ const io = new Server(server, { cors: { origin: "*" } });
 /* 🌍 GLOBAL STATE ---------------------------------------------------- */
 let players = {}; // { socket.id: { nickname, mode, isOnline } }
 let waitingRooms = { easy: [], hard: [] };
-let gameRooms = {}; // { mode: { players, turnOrder, currentTurnIndex, currentTurn, rounds, currentProblem, turnCount } }
+let gameRooms = {}; // { mode: { players, turnOrder, currentTurnIndex, currentTurn, rounds, currentProblem, turnCount, mode } }
 
 // timers per mode (keeps timeout refs)
 const gameTimers = {}; // { mode: timeoutId }
 
 /* 🧰 ADMIN API (ADD HERE) ------------------------------------------- */
-// GET /admin/clients  -> online count, list, and room snapshots
 app.get("/admin/clients", (_req, res) => {
     const online = Object.values(players)
         .filter((p) => p.isOnline)
@@ -41,12 +40,38 @@ app.get("/admin/clients", (_req, res) => {
                       turnOrder: r.turnOrder,
                       currentTurn: r.currentTurn,
                       rounds: r.rounds,
+                      turnCount: r.turnCount,
+                      currentProblem: {
+                        digits: r.currentProblem?.digits,
+                        operators: r.currentProblem?.operators,
+                        disabledOps: r.currentProblem?.disabledOps,
+                        target: r.currentProblem?.target,
+                        solutionExpr: r.currentProblem?.solutionExpr,
+                        solutionResult: r.currentProblem?.solutionResult,
+                      },
                   }
                 : null,
         ])
     );
 
     res.json({ onlineCount: online.length, online, rooms });
+});
+
+// Inspect specific room (full snapshot) for debugging
+app.get("/admin/room/:mode", (req, res) => {
+    const mode = req.params.mode;
+    const room = gameRooms[mode];
+    if (!room) return res.status(404).json({ error: "room_not_found" });
+    res.json({
+        players: room.players,
+        turnOrder: room.turnOrder,
+        currentTurnIndex: room.currentTurnIndex,
+        currentTurn: room.currentTurn,
+        rounds: room.rounds,
+        turnCount: room.turnCount,
+        mode: room.mode,
+        currentProblem: room.currentProblem,
+    });
 });
 
 // POST /admin/reset -> clear server state and end any running games
@@ -124,6 +149,9 @@ function generateProblem(mode) {
         target: result,
         expr,
         mode,
+        // explicit naming for clarity (server-side canonical)
+        solutionExpr: expr,
+        solutionResult: result,
     };
 }
 
@@ -140,12 +168,6 @@ function findSocketIdByNickname(name) {
 }
 
 /* ⚙️ TURN / ROUND MANAGEMENT --------------------------------------- */
-/**
- * nextTurn(mode)
- * - advances turn index, emits turnSwitch & syncTimer & yourTurn to next player
- * - generates new round problem when necessary
- * - clears/starts timeout for next turn
- */
 const roundLock = { easy: false, hard: false };
 
 function clearModeTimer(mode) {
@@ -157,9 +179,9 @@ function clearModeTimer(mode) {
 
 function scheduleAutoSwitch(mode, roundTime = 60) {
     clearModeTimer(mode);
+    console.log(`⏱️ [${mode}] scheduleAutoSwitch for ${roundTime}s`);
     gameTimers[mode] = setTimeout(() => {
         console.log(`⏰ [${mode}] Auto-switch (time up)`);
-        // When time up, server advances to next player
         nextTurn(mode);
     }, roundTime * 1000);
 }
@@ -168,7 +190,6 @@ function nextTurn(mode) {
     const room = gameRooms[mode];
     if (!room) return;
 
-    // prevent re-entrancy
     if (roundLock[mode]) {
         console.log(`⚠️ [LOCKED] nextTurn(${mode}) ignored`);
         return;
@@ -176,9 +197,9 @@ function nextTurn(mode) {
     roundLock[mode] = true;
 
     try {
-        // if not enough players -> end game
         if (!room.players || room.players.length < 2) {
             io.to(mode).emit("gameover", { reason: "not_enough_players" });
+            console.log(`💀 [${mode}] Ending game: not enough players`);
             delete gameRooms[mode];
             clearModeTimer(mode);
             return;
@@ -186,15 +207,37 @@ function nextTurn(mode) {
 
         // increment turn count & maybe new round
         room.turnCount = (room.turnCount || 0) + 1;
+        console.log(
+            `🔁 [${mode}] turnCount -> ${room.turnCount} (turnOrder.length=${room.turnOrder.length})`
+        );
+
         if (room.turnCount >= room.turnOrder.length) {
             room.rounds = (room.rounds || 1) + 1;
             room.turnCount = 0;
+            // generate and store problem with solution fields
             room.currentProblem = generateProblem(mode);
             io.to(mode).emit("newRound", {
                 round: room.rounds,
                 ...room.currentProblem,
             });
-            console.log(`🏁 [${mode}] New round ${room.rounds} generated`);
+            console.log(
+                `🏁 [${mode}] New round ${room.rounds} generated — target=${room.currentProblem.target} | solution=${room.currentProblem.solutionExpr} = ${room.currentProblem.solutionResult}`
+            );
+            console.log(
+                `📦 [${mode}] room snapshot:`,
+                JSON.stringify({
+                    rounds: room.rounds,
+                    currentTurnIndex: room.currentTurnIndex,
+                    turnCount: room.turnCount,
+                    turnOrder: room.turnOrder,
+                    players: room.players,
+                    currentProblem: {
+                        target: room.currentProblem.target,
+                        solutionExpr: room.currentProblem.solutionExpr,
+                        solutionResult: room.currentProblem.solutionResult,
+                    },
+                })
+            );
         }
 
         // advance index & pick next player
@@ -210,6 +253,10 @@ function nextTurn(mode) {
             round: room.rounds,
         });
 
+        console.log(
+            `➡️ [${mode}] turnSwitch -> next: ${nextPlayer} (idx=${room.currentTurnIndex}) | round=${room.rounds}`
+        );
+
         // emit syncTimer to all clients with a startTime
         const startTime = Date.now();
         const roundTime = room.mode === "hard" ? 30 : 60;
@@ -222,12 +269,14 @@ function nextTurn(mode) {
         const nextSocketId = findSocketIdByNickname(nextPlayer);
         if (nextSocketId) {
             io.to(nextSocketId).emit("yourTurn", { mode });
+            console.log(`📣 [${mode}] yourTurn emitted to socket ${nextSocketId} (${nextPlayer})`);
+        } else {
+            console.log(`⚠️ [${mode}] No socket found for next player ${nextPlayer}`);
         }
 
         // restart auto-switch timer for the next turn
         scheduleAutoSwitch(mode, room.mode === "hard" ? 30 : 60);
     } finally {
-        // unlock after short delay so double-resume can't race (server-side throttle)
         setTimeout(() => {
             roundLock[mode] = false;
             console.log(`🔓 [${mode}] unlocked`);
@@ -248,7 +297,6 @@ io.on("connection", (socket) => {
 
     socket.on("joinGame", ({ nickname, mode }) => {
         if (!nickname || !mode) return;
-        // remove from previous waiting room if present
         const old = players[socket.id];
         if (old?.mode && waitingRooms[old.mode]) {
             waitingRooms[old.mode] = waitingRooms[old.mode].filter(
@@ -265,7 +313,6 @@ io.on("connection", (socket) => {
         io.to(mode).emit("waitingList", { mode, players: waitingRooms[mode] });
         updatePlayerList();
 
-        // indicate start-able
         if (waitingRooms[mode].length >= 2) {
             io.to(mode).emit("canStart", { mode, canStart: true });
         }
@@ -280,7 +327,6 @@ io.on("connection", (socket) => {
 
         const shuffled = [...activePlayers].sort(() => Math.random() - 0.5);
 
-        // create first problem
         const firstProblem = generateProblem(mode);
 
         gameRooms[mode] = {
@@ -289,14 +335,32 @@ io.on("connection", (socket) => {
             currentTurnIndex: 0,
             currentTurn: shuffled[0],
             rounds: 1,
-            currentProblem: firstProblem,
+            currentProblem: {
+                ...firstProblem,
+            },
             turnCount: 0,
             mode,
             answers: [],
             problemGenerated: true,
         };
 
-        // broadcast preGame & countdown
+        console.log(
+            `🎮 [${mode}] game created: round=1 | starter=${nickname} | firstTurn=${shuffled[0]} | target=${firstProblem.target} | solution=${firstProblem.solutionExpr} = ${firstProblem.solutionResult}`
+        );
+        console.log(
+            `📦 [${mode}] initial room snapshot:`,
+            JSON.stringify({
+                players: gameRooms[mode].players,
+                turnOrder: gameRooms[mode].turnOrder,
+                rounds: gameRooms[mode].rounds,
+                currentProblem: {
+                    target: firstProblem.target,
+                    solutionExpr: firstProblem.solutionExpr,
+                    solutionResult: firstProblem.solutionResult,
+                },
+            })
+        );
+
         io.to(mode).emit("preGameStart", {
             mode,
             players: activePlayers,
@@ -304,7 +368,6 @@ io.on("connection", (socket) => {
             countdown: 3,
         });
 
-        // after countdown -> gameStart & sync
         setTimeout(() => {
             io.to(mode).emit("gameStart", {
                 ...firstProblem,
@@ -313,10 +376,14 @@ io.on("connection", (socket) => {
                 currentTurn: shuffled[0],
                 message: `🎮 Game started by ${nickname} (${shuffled.join(", ")})`,
                 round: 1,
-                solutionExpr: firstProblem.expr,
+                solutionExpr: firstProblem.solutionExpr,
+                solutionResult: firstProblem.solutionResult,
             });
 
-            // small delay then sync timer + notify first player's yourTurn
+            console.log(
+                `▶️ [${mode}] gameStart emitted | round=1 | currentTurn=${shuffled[0]} | target=${firstProblem.target} | solution=${firstProblem.solutionExpr} = ${firstProblem.solutionResult}`
+            );
+
             setTimeout(() => {
                 const startTime = Date.now();
                 io.to(mode).emit("syncTimer", { mode, startTime });
@@ -324,11 +391,10 @@ io.on("connection", (socket) => {
                 const firstSocketId = findSocketIdByNickname(shuffled[0]);
                 if (firstSocketId) {
                     io.to(firstSocketId).emit("yourTurn", { mode });
+                    console.log(`📣 [${mode}] yourTurn -> ${firstSocketId} (${shuffled[0]})`);
                 }
 
-                // schedule auto-switch for first turn
                 scheduleAutoSwitch(mode, gameRooms[mode].mode === "hard" ? 30 : 60);
-                // clear waiting room
                 waitingRooms[mode] = [];
                 updatePlayerList();
             }, 500);
@@ -338,6 +404,7 @@ io.on("connection", (socket) => {
     // client triggers resume (e.g., after answer popup) -> server advances
     socket.on("resumeGame", ({ mode }) => {
         if (!mode) return;
+        console.log(`⏯️ resumeGame requested for mode=${mode} by socket ${socket.id}`);
         nextTurn(mode);
     });
 
@@ -353,7 +420,6 @@ io.on("connection", (socket) => {
         let correctResult = null;
 
         if (isHard && room.currentProblem) {
-            // server validates against generated expression
             const expr = room.currentProblem.expr;
             const clean = expr
                 .replace(/×/g, "*")
@@ -368,17 +434,19 @@ io.on("connection", (socket) => {
                 console.error("❌ Server-side validation error:", err);
             }
         } else {
-            // normal mode rely on client-sent boolean
             correct = !!data.correct;
         }
 
-        // broadcast answerResult with server's decision
         io.to(data.mode).emit("answerResult", {
             ...data,
             correct,
             solutionExpr: correctExpr,
             solutionResult: correctResult,
         });
+
+        console.log(
+            `✅ [${data.mode}] answerResult from ${data.nickname} -> correct=${correct} | round=${room.rounds} | solution=${room.currentProblem?.solutionExpr} = ${room.currentProblem?.solutionResult}`
+        );
     });
 
     socket.on("playerLeftGame", ({ nickname, mode }) => {
@@ -389,6 +457,10 @@ io.on("connection", (socket) => {
         room.turnOrder = room.turnOrder.filter((n) => n !== nickname);
         room.players = room.players.filter((n) => n !== nickname);
 
+        console.log(
+            `📦 [${mode}] after leave — players=${room.players.length} | turnOrder=${room.turnOrder.length}`
+        );
+
         if (room.turnOrder.length < 2) {
             io.to(mode).emit("gameover", { reason: "not_enough_players" });
             delete gameRooms[mode];
@@ -397,7 +469,6 @@ io.on("connection", (socket) => {
             return;
         }
 
-        // if leaving player had the current turn -> move to next player immediately
         if (room.currentTurn === nickname) {
             room.currentTurnIndex = room.currentTurnIndex % room.turnOrder.length;
             const nextTurnName = room.turnOrder[room.currentTurnIndex];
@@ -406,12 +477,16 @@ io.on("connection", (socket) => {
             io.to(mode).emit("turnSwitch", {
                 nextTurn: nextTurnName,
                 currentTurnIndex: room.currentTurnIndex,
+                round: room.rounds,
             });
+
+            console.log(
+                `➡️ [${mode}] playerLeft triggered turnSwitch -> next: ${nextTurnName} | round=${room.rounds}`
+            );
 
             const nextSocket = findSocketIdByNickname(nextTurnName);
             if (nextSocket) io.to(nextSocket).emit("yourTurn", { mode });
 
-            // restart timer for the new turn
             scheduleAutoSwitch(mode, room.mode === "hard" ? 30 : 60);
         }
     });
@@ -447,21 +522,17 @@ io.on("connection", (socket) => {
     });
 
     socket.on("playerEmoji", (payload) => {
-        // payload = { nickname, emoji, ts }
         if (!payload || !payload.nickname || !payload.emoji) return;
 
-        // determine the mode/room of this socket (if known)
         const p = players[socket.id];
         const room = p?.mode || null;
 
-        // Broadcast to the room if we have it; otherwise broadcast to all connected clients
         if (room) {
             io.to(room).emit("playerEmoji", payload);
             console.log(
                 `💬 [emoji] ${payload.nickname} -> room ${room}: ${payload.emoji}`
             );
         } else {
-            // fallback: emit globally
             io.emit("playerEmoji", payload);
             console.log(`💬 [emoji] ${payload.nickname} -> all: ${payload.emoji}`);
         }

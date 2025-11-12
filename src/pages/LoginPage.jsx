@@ -2,18 +2,6 @@ import React from "react";
 import { motion } from "framer-motion";
 import { FaArrowRight } from "react-icons/fa";
 
-/**
- * LoginPage component
- *
- * Props:
- * - T: translations object (title, subtitle, enterName, start)
- * - nickname: current nickname state
- * - setNickname: setter for nickname state
- * - play: sound play function
- * - socket: socket instance
- * - setPage: function to change page state
- * - fade: motion props passed from parent
- */
 export default function LoginPage({
     T,
     nickname,
