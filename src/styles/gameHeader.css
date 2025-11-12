@@ -1,0 +1,103 @@
+/* ===============================
+🎮 GAME HEADER LAYOUT
+=============================== */
+
+/* Whole header wrapper */
+.game-header {
+  position: relative;
+  text-align: center;
+  padding-bottom: 45px; /* leave room for bottom bar */
+}
+
+/* Big player name line */
+.big-player {
+  font-size: 1.6rem;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: var(--text, #fff);
+}
+
+/* Bottom control bar (fixed) */
+.bottom-controls {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  z-index: 20;
+  padding: 8px 12px;
+  border-radius: 12px;
+  backdrop-filter: blur(6px);
+  background: rgba(0, 0, 0, 0.35);
+}
+
+/* Emoji dropdown container */
+.emoji-dropdown {
+  position: relative;
+}
+
+/* Emoji menu popup */
+.emoji-menu {
+  position: absolute;
+  bottom: 50px;
+  right: 0;
+  left: auto;
+  padding: 8px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 220px;
+  z-index: 30;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+}
+
+/* Emoji button */
+.emoji-btn {
+  font-size: 20px;
+  padding: 8px;
+  border-radius: 8px;
+  min-width: 40px;
+  border: none;
+  background: rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.emoji-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  transform: scale(1.05);
+}
+
+/* Game stats layout */
+.game-stats {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+/* Waiting header (when not your turn) */
+.waiting-header {
+  margin-top: 10px;
+  text-align: center;
+}
+
+.turn-status {
+  font-size: 1.1rem;
+  margin-bottom: 6px;
+}
+
+.waiting-time {
+  font-size: 2.4rem;
+  font-weight: 600;
+}
+
+.time-critical {
+  color: #ff4f4f;
+}

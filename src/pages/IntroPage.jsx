@@ -1,19 +1,7 @@
-// src/components/IntroPage.jsx
 import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { FaArrowRight } from "react-icons/fa";
 
-/**
- * IntroPage
- *
- * Props:
- * - T: translations object
- * - nickname: string
- * - lang: 'en'|'th'|'zh'
- * - play: sound function (optional)
- * - setPage: function to change page
- * - fade: motion props from parent
- */
 export default function IntroPage({
   T,
   nickname = "",

@@ -1,18 +1,6 @@
-// src/utils/checkAnswer.js
-/**
- * checkAnswer utility for IQ180
- *
- * Validates and evaluates a player's input expression, determines correctness,
- * finds the correct solution if wrong, and returns all relevant data.
- *
- * External side-effects (sounds, UI updates, socket emits) are handled by the caller.
- */
-
 import { findSolution } from "./solver.js";
 
 /**
- * Validates and evaluates a math expression using allowed symbols.
- * Returns structured info for the game state to use.
  *
  * @param {Object} params
  * @param {string} params.expression - user input expression string
@@ -68,10 +56,6 @@ export function checkAnswerCore({ expression, digits, target, disabledOps = [] }
   }
 }
 
-/**
- * Full wrapper for React component usage
- * Handles sound, popup, socket emit, score update, and auto-resume timer.
- */
 export async function handleCheckAnswer({
   expression,
   digits,

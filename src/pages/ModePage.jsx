@@ -1,4 +1,3 @@
-// src/pages/ModePage.jsx
 import { motion } from "framer-motion";
 
 export default function ModePage({

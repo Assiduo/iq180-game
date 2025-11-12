@@ -1,13 +1,3 @@
-/* =============================================================
- 🧩 IQ180 React App (Production-ready Clean Code)
----------------------------------------------------------------
- This file includes all logic for:
- - Game state and timer system
- - Multiplayer socket events
- - Sound and UI management
- - Comprehensive comments for each major section (English)
-=============================================================*/
-
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -19,7 +9,7 @@ import {
   FaSignOutAlt,
   FaPalette,
 } from "react-icons/fa";
-import "./App.css";
+import "./styles/App.css";
 
 import { texts, getTexts } from "./config/texts";
 import { themes, getTheme } from "./config/themes";
@@ -32,8 +22,8 @@ import LanguageDropdown from "./components/controls/LanguageDropdown";
 import ThemeDropdown from "./components/controls/ThemeDropdown";
 import VolumeDropdown from "./components/controls/VolumeDropdown";
 
-import LoginPage from "./components/LoginPage";
-import IntroPage from "./components/IntroPage";
+import LoginPage from "./pages/LoginPage";
+import IntroPage from "./pages/IntroPage";
 import ModePage from "./pages/ModePage";
 import WaitingPage from "./pages/WaitingPage";
 import GamePage from "./pages/GamePage";

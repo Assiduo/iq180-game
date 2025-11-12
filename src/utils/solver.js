@@ -1,22 +1,3 @@
-// src/utils/solver.js
-/**
- * findSolution(digits, target, disabledOps)
- *
- * Finds a simple flat expression using exactly the 5 digits (in any order) and
- * four operators (from the allowed set) that evaluates to `target`.
- *
- * - digits: array of numbers (e.g. [1,2,3,4,5])
- * - target: integer target value
- * - disabledOps: array of operator tokens disabled by server/UI, e.g. ["×","÷"]
- *
- * Returns a string expression using the UI operator tokens (×, ÷) when found,
- * or null if none found.
- *
- * NOTE: This function uses eval() on internally constructed expressions made
- * from digits and allowed operators only (no user input). That is intentional
- * and acceptable here because inputs are controlled.
- */
-
 const toJsOp = (uiOp) => {
   if (uiOp === "×") return "*";
   if (uiOp === "÷") return "/";

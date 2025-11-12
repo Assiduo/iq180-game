@@ -1,14 +1,3 @@
-// src/utils/problemGenerator.js
-/**
- * Problem generator utilities for IQ180.
- * - createExpressionWithResult: builds a random expression from given numbers + ops and returns { expr, result }
- * - generateProblem: picks 5 random digits and operators for a new round and returns the problem object
- *
- * NOTE: This module uses eval() to compute results for generated expressions.
- * It's safe for client-side generation with controlled inputs (numbers + a few operators),
- * but avoid feeding it arbitrary user input.
- */
-
 function shuffleInPlace(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));

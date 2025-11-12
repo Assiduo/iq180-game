@@ -1,6 +1,3 @@
-// src/utils/mathUtils.js
-// Safe-ish evaluator and numeric helpers used by solver/generator.
-
 const makeSafeFunction = (expr) => {
   // Replace sqrt symbol if used
   const cleaned = expr
