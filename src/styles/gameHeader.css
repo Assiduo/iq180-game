@@ -4,100 +4,131 @@
 
 /* Whole header wrapper */
 .game-header {
-  position: relative;
-  text-align: center;
-  padding-bottom: 45px; /* leave room for bottom bar */
+    position: relative;
+    text-align: center;
 }
 
 /* Big player name line */
 .big-player {
-  font-size: 1.6rem;
-  font-weight: 600;
-  margin-bottom: 10px;
-  color: var(--text, #fff);
+    font-size: 1.6rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: var(--text, #fff);
 }
 
 /* Bottom control bar (fixed) */
 .bottom-controls {
-  position: fixed;
-  left: 50%;
-  bottom: 16px;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 12px;
-  justify-content: center;
-  align-items: center;
-  flex-wrap: wrap;
-  z-index: 20;
-  padding: 8px 12px;
-  border-radius: 12px;
-  backdrop-filter: blur(6px);
-  background: rgba(0, 0, 0, 0.35);
+    position: fixed;
+    left: 50%;
+    bottom: 35px;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    z-index: 20;
+    padding: 8px 12px;
+    border-radius: 12px;
+    backdrop-filter: blur(6px);
+    background: rgba(0, 0, 0, 0.35);
 }
 
-/* Emoji dropdown container */
+/* ensure the dropdown's parent is the positioning context */
 .emoji-dropdown {
-  position: relative;
+    position: relative; /* CRUCIAL - anchors the .emoji-menu */
+    display: inline-block;
+    z-index: 200; /* keep it above other siblings */
 }
 
-/* Emoji menu popup */
+/* make sure container won't clip (if you control parent, add there too) */
+.bottom-controls {
+    overflow: visible; /* allow popup to escape parent box */
+}
+
+/* emoji popup: appear above the button, centered horizontally */
 .emoji-menu {
-  position: absolute;
-  bottom: 50px;
-  right: 0;
-  left: auto;
-  padding: 8px;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  width: 220px;
-  z-index: 30;
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(6px);
+    position: absolute;
+    bottom: calc(100% + 8px); /* 8px gap above the button */
+    left: 50%;
+    transform: translateX(-50%) scale(0.98);
+    transform-origin: 50% 100%; /* animate from bottom-center */
+    min-width: 180px;
+    max-width: 280px;
+    padding: 8px 10px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+    z-index: 1000;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.56);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    transition:
+        transform 160ms cubic-bezier(0.2, 0.9, 0.2, 1),
+        opacity 160ms;
+    opacity: 1;
 }
 
-/* Emoji button */
+/* small show animation when inserted into DOM */
+.emoji-menu.show {
+    transform: translateX(-50%) scale(1);
+    opacity: 1;
+}
+
+/* emoji buttons */
 .emoji-btn {
-  font-size: 20px;
-  padding: 8px;
-  border-radius: 8px;
-  min-width: 40px;
-  border: none;
-  background: rgba(255, 255, 255, 0.05);
-  cursor: pointer;
-  transition: all 0.15s ease;
+    font-size: 20px;
+    padding: 6px;
+    border-radius: 8px;
+    min-width: 40px;
+    border: none;
+    background: rgba(255, 255, 255, 0.03);
+    cursor: pointer;
+    transition:
+        transform 120ms,
+        background 120ms;
 }
 .emoji-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
-  transform: scale(1.05);
+    transform: translateY(-3px);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+/* small responsive tweak so the popup doesn't overflow viewport */
+@media (max-width: 420px) {
+    .emoji-menu {
+        left: 50%;
+        width: calc(100vw - 32px);
+        transform: translateX(-50%);
+    }
 }
 
 /* Game stats layout */
 .game-stats {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
 }
 
 /* Waiting header (when not your turn) */
 .waiting-header {
-  margin-top: 10px;
-  text-align: center;
+    margin-top: 10px;
+    text-align: center;
 }
 
 .turn-status {
-  font-size: 1.1rem;
-  margin-bottom: 6px;
+    font-size: 1.1rem;
+    margin-bottom: 6px;
 }
 
 .waiting-time {
-  font-size: 2.4rem;
-  font-weight: 600;
+    font-size: 2.4rem;
+    font-weight: 600;
 }
 
 .time-critical {
-  color: #ff4f4f;
+    color: #ff4f4f;
 }
