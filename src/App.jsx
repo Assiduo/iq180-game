@@ -1,945 +1,724 @@
-// src/App.jsx
-/* =============================================================
- 🧩 IQ180 React App (Blended & Patched)
- - Single-file client with robust timer sync, submit lock,
-   safe socket listener lifecycle, and consistent game logic.
-=============================================================*/
-
-import React, { useEffect, useRef, useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Howl } from "howler";
 import {
-  FaArrowLeft,
-  FaArrowRight,
-  FaVolumeUp,
-  FaGlobe,
-  FaRedo,
-  FaSignOutAlt,
-  FaPalette,
-  FaTrophy,
+    FaArrowLeft,
+    FaArrowRight,
+    FaVolumeUp,
+    FaGlobe,
+    FaRedo,
+    FaSignOutAlt,
+    FaPalette,
 } from "react-icons/fa";
-import "./App.css";
+import "./styles/App.css";
 
-import clickSoundFile from "./sounds/click.mp3";
-import correctSoundFile from "./sounds/correct.mp3";
-import wrongSoundFile from "./sounds/wrong.mp3";
-import timeoutSoundFile from "./sounds/timeout.mp3";
-import bgmFile from "./sounds/bgm.mp3";
+import { texts, getTexts } from "./config/texts";
+import { themes, getTheme } from "./config/themes";
 
-import { io } from "socket.io-client";
+import useGameSocket from "./hooks/useGameSocket";
+import useGameTimer from "./hooks/useGameTimer";
 
-/* ====== CONFIG ====== */
-// Replace with your server IP if needed:
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:4000";
-const socket = io(SERVER_URL, { autoConnect: true, transports: ["websocket", "polling"] });
+import useSound from "./hooks/useSound";
+import LanguageDropdown from "./components/controls/LanguageDropdown";
+import ThemeDropdown from "./components/controls/ThemeDropdown";
+import VolumeDropdown from "./components/controls/VolumeDropdown";
 
+import LoginPage from "./pages/LoginPage";
+import IntroPage from "./pages/IntroPage";
+import ModePage from "./pages/ModePage";
+import WaitingPage from "./pages/WaitingPage";
+import GamePage from "./pages/GamePage";
 
-/* ====== Helpers: generate / solve ====== */
-const generateProblemLocal = (m = "easy") => {
-  const nums = [];
-  while (nums.length < 5) nums.push(Math.floor(Math.random() * 9) + 1);
-  const ops = ["+", "-", "×", "÷"];
-  const expr = `${nums[0]}+${nums[1]}+${nums[2]}+${nums[3]}+${nums[4]}`;
-  // eslint-disable-next-line no-eval
-  const targetVal = Math.round(eval(expr));
-  return { digits: nums, operators: ops, disabledOps: [], target: targetVal, mode: m };
-};
+import { handleCheckAnswer } from "./utils/checkAnswer";
 
-// brute force finder (returns expression using × and ÷)
-const findSolutionBrute = (digitsArr = [], tgt = 0, disabled = []) => {
-  if (!Array.isArray(digitsArr) || digitsArr.length === 0) return null;
-  const ops = ["+", "-", "*", "/"];
-  const permute = (arr) => {
-    if (arr.length <= 1) return [arr];
-    const res = [];
-    arr.forEach((v, i) => {
-      const rest = [...arr.slice(0, i), ...arr.slice(i + 1)];
-      permute(rest).forEach((p) => res.push([v, ...p]));
-    });
-    return res;
-  };
-  const numPerms = permute(digitsArr);
-  for (const nums of numPerms) {
-    for (let o1 of ops) for (let o2 of ops) for (let o3 of ops) for (let o4 of ops) {
-      const expr = `${nums[0]}${o1}${nums[1]}${o2}${nums[2]}${o3}${nums[3]}${o4}${nums[4]}`;
-      try {
-        // eslint-disable-next-line no-eval
-        const val = eval(expr);
-        if (Number.isFinite(val) && Math.abs(val - tgt) < 1e-9) {
-          return expr.replace(/\*/g, "×").replace(/\//g, "÷");
-        }
-      } catch {}
-    }
-  }
-  return null;
-};
-
-/* ====== Component ====== */
 export default function App() {
-  /* ---------------- UI / i18n / theme ---------------- */
-  const [lang, setLang] = useState("en");
-  const texts = {
-    en: {
-      title: "IQ180",
-      subtitle: "Challenge your logic to the limit.",
-      enterName: "Enter nickname...",
-      start: "Start",
-      selectMode: "Select Game Mode",
-      easy: "Normal Mode",
-      hard: "Genius Mode",
-      target: "Target",
-      timeLeft: "Time Left",
-      score: "Score",
-      delete: "Clear",
-      submit: "Submit",
-      correct: "✅ Correct!",
-      late: "⏳ Too Late!",
-      wrong: "❌ Wrong!",
-      timeout: "⏰ Time’s Up!",
-      playAgain: "Play Again",
-      exit: "Exit",
-      back: "Back",
-      stats: "Stats Summary",
-      history: "History",
-      rounds: "Rounds Played",
-      notEnough: "Use all digits before submitting!",
-      invalidExpr: "Invalid Expression. Each number must be followed by an operator.",
-      buildEq: "Build your equation...",
-      playerName: "Player Name",
-      solution: "Possible Solution",
-      admin: "Admin",
-    },
-    th: {
-      title: "IQ180",
-      subtitle: "ท้าทายตรรกะของคุณให้ถึงขีดสุด!",
-      enterName: "กรอกชื่อผู้เล่น...",
-      start: "เริ่ม",
-      selectMode: "เลือกโหมดเกม",
-      easy: "โหมดปกติ",
-      hard: "โหมดอัจฉริยะ",
-      target: "เป้าหมาย",
-      timeLeft: "เวลาที่เหลือ",
-      score: "คะแนน",
-      delete: "ลบ",
-      submit: "ตรวจคำตอบ",
-      correct: "✅ ถูกต้อง!",
-      late: "⏳ สายไปแล้ว!",
-      wrong: "❌ ผิด!",
-      timeout: "⏰ หมดเวลา!",
-      playAgain: "เล่นต่อ",
-      exit: "ออกจากเกม",
-      back: "ย้อนกลับ",
-      stats: "สรุปผลการเล่น",
-      history: "ประวัติการเล่น",
-      rounds: "จำนวนรอบทั้งหมด",
-      notEnough: "ต้องใช้เลขทั้งหมดก่อนกดส่งคำตอบ!",
-      invalidExpr: "รูปแบบสมการไม่ถูกต้อง ต้องมีเครื่องหมายคั่นระหว่างเลข",
-      buildEq: "สร้างสมการของคุณ...",
-      playerName: "ชื่อผู้เล่น",
-      solution: "วิธีเฉลยที่เป็นไปได้",
-      admin: "แอดมิน",
-    },
-    zh: {
-      title: "IQ180",
-      subtitle: "挑战你的逻辑极限！",
-      enterName: "输入昵称...",
-      start: "开始",
-      selectMode: "选择模式",
-      easy: "普通模式",
-      hard: "天才模式",
-      target: "目标",
-      timeLeft: "剩余时间",
-      score: "分数",
-      delete: "删除",
-      submit: "提交",
-      correct: "✅ 正确!",
-      wrong: "❌ 错误!",
-      timeout: "⏰ 时间到!",
-      playAgain: "再玩一次",
-      exit: "退出",
-      back: "返回",
-      stats: "统计结果",
-      history: "历史记录",
-      rounds: "游戏轮次",
-      notEnough: "请使用所有数字再提交！",
-      invalidExpr: "表达式无效，数字之间必须有运算符。",
-      buildEq: "建立你的方程式...",
-      playerName: "玩家名称",
-      solution: "可能的解法",
-      admin: "管理",
-    },
-  };
-  const T = texts[lang];
+    const [lang, setLang] = useState("en");
+    const T = getTexts(lang);
 
-  const themes = {
-    galaxyBlue: {
-      name: "Galaxy Neon Blue",
-      background: "radial-gradient(circle at 20% 30%, #001133, #000000 70%)",
-      accent: "#00bfff",
-      text: "#eaf6ff",
-    },
-    galaxyPink: {
-      name: "Cyber Neon Pink",
-      background: "radial-gradient(circle at 80% 20%, #2a001f, #000000 80%)",
-      accent: "#ff00a6",
-      text: "#ffe6ff",
-    },
-    auroraEmerald: {
-      name: "Aurora Emerald",
-      background: "linear-gradient(135deg, #003333, #006644, #001122)",
-      accent: "#00ffcc",
-      text: "#eafff4",
-    },
-    crimsonInferno: {
-      name: "Crimson Inferno",
-      background: "linear-gradient(135deg, #2b0000, #660000, #330000)",
-      accent: "#ff4444",
-      text: "#ffe5e5",
-    },
-  };
-  const [theme, setTheme] = useState("galaxyBlue");
-  const [dropdownOpen, setDropdownOpen] = useState(null);
+    /* 🎨 THEMES */
+    const [theme, setTheme] = useState("galaxyBlue");
+    const [dropdownOpen, setDropdownOpen] = useState(null);
 
-  /* ---------------- Sounds (stable refs) ---------------- */
-  const clickRef = useRef(null);
-  const correctRef = useRef(null);
-  const wrongRef = useRef(null);
-  const timeoutRef = useRef(null);
-  const bgmRef = useRef(null);
-  const [muted, setMuted] = useState(false);
-  const [volume, setVolume] = useState(0.4);
+    // pick current theme (object)
+    const currentTheme = getTheme(theme);
+    // 🧩 Multiplayer waiting room
+    const [waitingPlayers, setWaitingPlayers] = useState([]);
 
-  useEffect(() => {
-    clickRef.current = new Howl({ src: [clickSoundFile], volume: 0.6 });
-    correctRef.current = new Howl({ src: [correctSoundFile], volume: 0.7 });
-    wrongRef.current = new Howl({ src: [wrongSoundFile], volume: 0.7 });
-    timeoutRef.current = new Howl({ src: [timeoutSoundFile], volume: 0.6 });
-    bgmRef.current = new Howl({ src: [bgmFile], loop: true, volume });
+    /* 🔊 SOUND ENGINE */
+    // replace existing sound state with hook:
+    const { play, muted, volume, setVolume, toggleMute } = useSound({
+        initialVolume: 0.4,
+    });
 
-    if (!muted) {
-      try { bgmRef.current.play(); } catch (e) {}
-    }
-    return () => { bgmRef.current?.stop(); };
-    // run once
-  }, []); // eslint-disable-line
+    /* ⚙️ GAME STATE */
+    const [page, setPage] = useState("login");
+    const [nickname, setNickname] = useState("");
+    const [mode, setMode] = useState("easy");
+    const [score, setScore] = useState(0);
+    const [rounds, setRounds] = useState(0);
 
-  useEffect(() => {
-    if (!bgmRef.current) return;
-    bgmRef.current.volume(volume);
-    if (muted) bgmRef.current.pause();
-    else if (!bgmRef.current.playing()) bgmRef.current.play();
-  }, [volume, muted]);
+    const [digits, setDigits] = useState([]);
+    const [operators, setOperators] = useState([]);
+    const [disabledOps, setDisabledOps] = useState([]);
+    const [target, setTarget] = useState(0);
+    const [expression, setExpression] = useState("");
 
-  const playSound = (type) => {
-    if (muted) return;
-    if (type === "click") clickRef.current?.play();
-    if (type === "correct") correctRef.current?.play();
-    if (type === "wrong") wrongRef.current?.play();
-    if (type === "timeout") timeoutRef.current?.play();
-  };
+    const [resultPopup, setResultPopup] = useState(null);
+    const [solution, setSolution] = useState(null);
+    const [history, setHistory] = useState([]);
+    const [lastWasNumber, setLastWasNumber] = useState(false);
+    const [lastWasSqrt, setLastWasSqrt] = useState(false);
+    const [solutionExpr, setSolutionExpr] = useState(""); // ✅ เก็บสมการเฉลยจริง
+    const [endByName, setEndByName] = useState(null);
+    // 🧩 Keep latest problem refs for stable solution lookups
+    const problemRef = useRef({ digits: [], target: 0, disabledOps: [] });
 
-  const playSoundInternal = (t) => { try { playSound(t); } catch (e) {} };
+    /* 👥 Multiplayer & Room State */
+    const [playerList, setPlayerList] = useState([]); // รายชื่อผู้เล่นทั้งหมด (ออนไลน์)
+    const [canStart, setCanStart] = useState(false); // ห้องพร้อมเริ่มหรือยัง
+    const [preGameInfo, setPreGameInfo] = useState(null); // ข้อมูลก่อนเริ่ม (starter, mode, players)
+    const [countdown, setCountdown] = useState(0); // นับถอยหลังก่อนเริ่มเกม
+    const [showCountdown, setShowCountdown] = useState(false); // แสดง countdown popup หรือไม่
+    const [gameState, setGameState] = useState({}); // สถานะเกมกลาง (turn, order, ฯลฯ)
+    const [isMyTurn, setIsMyTurn] = useState(false); // ตอนนี้เป็นตาเราไหม
 
-  /* ---------------- App state ---------------- */
-  const [page, setPage] = useState("login");
-  const [nickname, setNickname] = useState("");
-  const [mode, setMode] = useState("easy");
-  const [score, setScore] = useState(0);
-  const [rounds, setRounds] = useState(0);
+    const [autoResumeCount, setAutoResumeCount] = useState(null);
 
-  const [digits, setDigits] = useState([]);
-  const [operators, setOperators] = useState(["+", "-", "×", "÷", "(", ")", "√"]);
-  const [disabledOps, setDisabledOps] = useState([]);
-  const [target, setTarget] = useState(0);
-  const [expression, setExpression] = useState("");
+    // ===== MISSING STATE (restore from original) =====
+    const [scores, setScores] = useState({});
 
-  const [resultPopup, setResultPopup] = useState(null);
-  const [solutionExpr, setSolutionExpr] = useState("");
-  const [history, setHistory] = useState([]);
-  const [lastWasNumber, setLastWasNumber] = useState(false);
-
-  const [playerList, setPlayerList] = useState([]);
-  const [waitingPlayers, setWaitingPlayers] = useState([]);
-  const [canStart, setCanStart] = useState(false);
-  const [preGameInfo, setPreGameInfo] = useState(null);
-  const [countdown, setCountdown] = useState(0);
-  const [showCountdown, setShowCountdown] = useState(false);
-
-  const [gameState, setGameState] = useState({});
-  const [isMyTurn, setIsMyTurn] = useState(false);
-
-  const [autoResumeCount, setAutoResumeCount] = useState(null);
-
-  const [leaderboard, setLeaderboard] = useState([]);
-  const [scores, setScores] = useState({});
-  const [personalBest, setPersonalBest] = useState(0);
-  const [reactionPopup, setReactionPopup] = useState(null);
-
-  /* ---------------- Timer ---------------- */
-  const [baseTime, setBaseTime] = useState(null); // ms timestamp from server/host
-  const [timeLeft, setTimeLeft] = useState(60);
-  const [running, setRunning] = useState(false);
-  const timerRef = useRef(null);
-  const roundTimeRef = useRef(60);
-
-  const problemRef = useRef({ digits: [], target: 0, disabledOps: [] });
-  const submissionLockRef = useRef(false);
-
-  /* ---------------- Socket listeners (single attach) ---------------- */
-  useEffect(() => {
-    if (!socket) return;
-
-    const onConnect = () => {
-      console.log("socket connected");
-      if (nickname && nickname.trim()) socket.emit("setNickname", nickname);
-      socket.emit("getLeaderboard");
-    };
-
-    const onPlayerList = (list) => setPlayerList(Array.isArray(list) ? list : []);
-    const onWaitingList = (d) => { if (!d) return; if (!d.mode || d.mode === mode) setWaitingPlayers(Array.isArray(d.players) ? d.players : []); };
-    const onCanStart = (d) => { if (!d) return; if (d.mode === mode) setCanStart(!!d.canStart); };
-
-    const onPreGameStart = (d) => {
-      if (!d) return;
-      setPreGameInfo({ mode: d.mode, starter: d.starter, players: d.players });
-      let counter = d.countdown ?? 3;
-      setCountdown(counter);
-      setShowCountdown(true);
-      const t = setInterval(() => {
-        counter -= 1;
-        setCountdown(counter);
-        if (counter <= 0) { clearInterval(t); setShowCountdown(false); }
-      }, 1000);
-    };
-
-    const onGameStart = (d) => {
-      if (!d) return;
-      const rt = d.roundTime ?? (d.mode === "hard" ? 30 : 60);
-      roundTimeRef.current = rt;
-
-      setDigits(d.digits || []);
-      setOperators(d.operators || ["+", "-", "×", "÷"]);
-      setDisabledOps(d.disabledOps || []);
-      setTarget(d.target || 0);
-      setMode(d.mode || "easy");
-      problemRef.current = { digits: d.digits || [], target: d.target || 0, disabledOps: d.disabledOps || [] };
-
-      const listPlayers = Array.isArray(d.players) && d.players.length ? d.players : (Array.isArray(d.turnOrder) ? d.turnOrder : []);
-      const uniquePlayers = Array.from(new Set([...listPlayers, nickname].filter(Boolean)));
-      setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
-
-      setGameState({
-        turnOrder: d.turnOrder || d.players || [],
-        currentTurn: d.currentTurn || null,
-        mode: d.mode || mode,
-        host: d.host,
-      });
-
-      const amTurn = d.currentTurn === nickname;
-      setIsMyTurn(amTurn);
-      setPage("game");
-      setExpression("");
-      setLastWasNumber(false);
-      setResultPopup(null);
-      setSolutionExpr("");
-      setScore(0);
-      setRounds(d.round ?? 1);
-
-      if (d.startTime) {
-        setBaseTime(d.startTime);
-        setRunning(true);
-        const elapsed = Math.floor((Date.now() - d.startTime) / 1000);
-        setTimeLeft(Math.max(rt - elapsed, 0));
-      } else if (amTurn) {
-        const now = Date.now();
-        setBaseTime(now);
-        setRunning(true);
-        setTimeLeft(rt);
-        if (d.host === nickname) {
-          socket.emit("syncTimer", { startTime: now, roundTime: rt, mode: d.mode });
-        }
-      } else {
-        setRunning(false);
-        setBaseTime(null);
-        setTimeLeft(rt);
-      }
-    };
-
-    const onNewRound = (d) => {
-      if (!d) return;
-      const rt = d.roundTime ?? roundTimeRef.current;
-      roundTimeRef.current = rt;
-
-      setDigits(d.digits || []);
-      setOperators(d.operators || ["+", "-", "×", "÷"]);
-      setDisabledOps(d.disabledOps || []);
-      setTarget(d.target || 0);
-      if (d.round !== undefined) setRounds(d.round);
-      setExpression("");
-      problemRef.current = { digits: d.digits || [], target: d.target || 0, disabledOps: d.disabledOps || [] };
-      setSolutionExpr("");
-      setResultPopup(null);
-
-      if (d.startTime) {
-        setBaseTime(d.startTime);
-        setRunning(true);
-        const elapsed = Math.floor((Date.now() - d.startTime) / 1000);
-        setTimeLeft(Math.max(rt - elapsed, 0));
-      } else {
-        setRunning(false);
-        setBaseTime(null);
-        setTimeLeft(rt);
-      }
-    };
-
-    const onTurnSwitch = (d) => {
-      if (!d) return;
-      setGameState((prev) => ({ ...(prev || {}), currentTurn: d.nextTurn }));
-      if (d.round !== undefined) setRounds(d.round);
-      setIsMyTurn(d.nextTurn === nickname);
-
-      if (d.startTime) {
-        roundTimeRef.current = d.roundTime ?? roundTimeRef.current;
-        setBaseTime(d.startTime);
-        setRunning(true);
-        const elapsed = Math.floor((Date.now() - d.startTime) / 1000);
-        setTimeLeft(Math.max(roundTimeRef.current - elapsed, 0));
-      } else {
-        // keep clients paused until sync or until their turn
-        setRunning(false);
-        setBaseTime(null);
-        // If it's us, start our local timer and ask for authoritative sync
-        if (d.nextTurn === nickname) {
-          const now = Date.now();
-          roundTimeRef.current = roundTimeRef.current ?? (mode === "hard" ? 30 : 60);
-          setBaseTime(now);
-          setRunning(true);
-          setTimeLeft(roundTimeRef.current);
-          socket.emit("requestSync", { mode });
-        }
-      }
-    };
-
-    const onSyncTimer = ({ startTime, roundTime }) => {
-      if (!startTime) return;
-      roundTimeRef.current = roundTime ?? roundTimeRef.current ?? (mode === "hard" ? 30 : 60);
-      setBaseTime(startTime);
-      setRunning(true);
-      const elapsed = Math.floor((Date.now() - startTime) / 1000);
-      setTimeLeft(Math.max(roundTimeRef.current - elapsed, 0));
-    };
-
-    const onYourTurn = ({ mode: myMode, startTime, roundTime }) => {
-      setIsMyTurn(true);
-      if (myMode) setMode(myMode);
-      roundTimeRef.current = roundTime ?? roundTimeRef.current ?? (myMode === "hard" ? 30 : 60);
-
-      // Use server-provided problem if it exists; otherwise generate local
-      if (!problemRef.current?.digits?.length) {
-        const g = generateProblemLocal(myMode);
-        setDigits(g.digits);
-        setDisabledOps(g.disabledOps);
-        setTarget(g.target);
-        problemRef.current = { digits: g.digits, target: g.target, disabledOps: g.disabledOps };
-      }
-
-      if (startTime) {
-        setBaseTime(startTime);
-        setRunning(true);
-        const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        setTimeLeft(Math.max(roundTimeRef.current - elapsed, 0));
-      } else {
-        const now = Date.now();
-        setBaseTime(now);
-        setRunning(true);
-        setTimeLeft(roundTimeRef.current);
-        if ((gameState?.host || "") === nickname) {
-          socket.emit("syncTimer", { startTime: now, roundTime: roundTimeRef.current, mode: myMode });
-        }
-      }
-
-      setExpression("");
-      setLastWasNumber(false);
-      setResultPopup(null);
-    };
-
-    const onAnswerResult = (d) => {
-      if (!d) return;
-      setScores((prev) => ({ ...(prev || {}), [d.nickname]: (prev?.[d.nickname] || 0) + (d.correct ? 1 : 0) }));
-      if (d.round !== undefined) setRounds(d.round);
-    };
-
-    const onGameOver = (d) => {
-      setResultPopup("gameover");
-      stopTimer();
-      setRunning(false);
-    };
-
-    const onPlayerLeft = (d) => {
-      if (!d) return;
-      if (d.mode === mode) setWaitingPlayers((p) => p.filter((n) => n !== d.nickname));
-    };
-
-    const onReaction = (d) => {
-      setReactionPopup(`${d.from}: ${d.emoji}`);
-      setTimeout(() => setReactionPopup(null), 2000);
-    };
-
-    const onPersonalBest = (d) => { if (d?.best !== undefined) setPersonalBest(d.best); };
-    const onLeaderboardUpdate = (d) => setLeaderboard(d || []);
-
-    // attach
-    socket.on("connect", onConnect);
-    socket.on("playerList", onPlayerList);
-    socket.on("waitingList", onWaitingList);
-    socket.on("canStart", onCanStart);
-    socket.on("preGameStart", onPreGameStart);
-    socket.on("gameStart", onGameStart);
-    socket.on("newRound", onNewRound);
-    socket.on("turnSwitch", onTurnSwitch);
-    socket.on("syncTimer", onSyncTimer);
-    socket.on("yourTurn", onYourTurn);
-    socket.on("answerResult", onAnswerResult);
-    socket.on("gameover", onGameOver);
-    socket.on("playerLeft", onPlayerLeft);
-    socket.on("reaction", onReaction);
-    socket.on("personalBest", onPersonalBest);
-    socket.on("leaderboardUpdate", onLeaderboardUpdate);
-
-    if (!socket.connected) socket.connect();
-
-    // cleanup all attached in this effect
-    return () => {
-      socket.off("connect", onConnect);
-      socket.off("playerList", onPlayerList);
-      socket.off("waitingList", onWaitingList);
-      socket.off("canStart", onCanStart);
-      socket.off("preGameStart", onPreGameStart);
-      socket.off("gameStart", onGameStart);
-      socket.off("newRound", onNewRound);
-      socket.off("turnSwitch", onTurnSwitch);
-      socket.off("syncTimer", onSyncTimer);
-      socket.off("yourTurn", onYourTurn);
-      socket.off("answerResult", onAnswerResult);
-      socket.off("gameover", onGameOver);
-      socket.off("playerLeft", onPlayerLeft);
-      socket.off("reaction", onReaction);
-      socket.off("personalBest", onPersonalBest);
-      socket.off("leaderboardUpdate", onLeaderboardUpdate);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // attach once
-
-  /* ---------------- Host-synced ticker (runs when running/baseTime present) ---------------- */
-  useEffect(() => {
-    if (!running || baseTime == null) {
-      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-      return;
+    // ===== MISSING startGame helper used by popup's "Play Again" button =====
+    function startGame(modeName) {
+        // if you want host behavior or client triggered start:
+        if (!socket || !socket.connected) return;
+        socket.emit("startGame", { mode: modeName || mode, nickname });
     }
 
-    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    /* ======= EMOJI / REACTIONS ======= */
+    const [reactions, setReactions] = useState({}); // { nickname: { emoji, ts } }
+    const [latestEmojiPopup, setLatestEmojiPopup] = useState(null); // { emoji, from }
+    const emojiTimeoutsRef = useRef({});
 
-    const tick = () => {
-      const now = Date.now();
-      const elapsed = Math.floor((now - baseTime) / 1000);
-      const roundTime = roundTimeRef.current ?? (mode === "hard" ? 30 : 60);
-      const remaining = Math.max(roundTime - elapsed, 0);
-      setTimeLeft(remaining);
-
-      if (remaining <= 0) {
-        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-        setRunning(false);
-        playSound("timeout");
-        setResultPopup("timeout");
+    const sendEmoji = (emoji) => {
         try {
-          const sol = findSolutionBrute(problemRef.current.digits || [], problemRef.current.target || 0, problemRef.current.disabledOps || []);
-          setSolutionExpr(sol || "No valid solution found");
-        } catch {
-          setSolutionExpr("No valid solution found");
+            play("click");
+        } catch {}
+        if (!nickname) return;
+
+        const payload = { nickname, emoji, ts: Date.now() };
+
+        // Local echo
+        setReactions((prev) => ({ ...prev, [nickname]: { emoji, ts: payload.ts } }));
+        setLatestEmojiPopup({ emoji, from: nickname });
+        setTimeout(() => setLatestEmojiPopup(null), 1600);
+
+        // Auto-clear after 5s
+        if (emojiTimeoutsRef.current[nickname])
+            clearTimeout(emojiTimeoutsRef.current[nickname]);
+        emojiTimeoutsRef.current[nickname] = setTimeout(() => {
+            setReactions((prev) => {
+                const next = { ...prev };
+                delete next[nickname];
+                return next;
+            });
+            delete emojiTimeoutsRef.current[nickname];
+        }, 5000);
+
+        // ✅ Use the same active socket managed by useGameSocket
+        if (socket && socket.connected) {
+            console.log("📤 Sending emoji:", payload);
+            socket.emit("playerEmoji", payload);
+        } else {
+            console.warn("⚠️ No active socket connection for emoji!");
         }
-
-        // inform server
-        socket.emit("answerResult", {
-          nickname,
-          result: "timeout",
-          correct: false,
-          score,
-          round: rounds + 1,
-          mode,
-          clientTime: Date.now(),
-        });
-
-        // auto resume countdown
-        let count = 3;
-        setAutoResumeCount(count);
-        const cInt = setInterval(() => {
-          count -= 1;
-          setAutoResumeCount(count);
-          if (count <= 0) {
-            clearInterval(cInt);
-            setAutoResumeCount(null);
-            setResultPopup(null);
-            socket.emit("resumeGame", { mode });
-            setIsMyTurn(false);
-          }
-        }, 1000);
-      }
     };
 
-    tick();
-    timerRef.current = setInterval(tick, 1000);
+    /* 🕒 TIMER (Client-side synced with Player 1, global for all players) */
+    const [baseTime, setBaseTime] = useState(null);
+    const [timeLeft, setTimeLeft] = useState(60);
+    const [running, setRunning] = useState(false);
 
-    return () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
-  }, [running, baseTime, mode, rounds, score]);
-
-  /* ---------------- Actions ---------------- */
-  const startGame = (playMode = mode) => {
-    socket.emit("startGame", { mode: playMode, nickname });
-  };
-
-  const stopTimer = () => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    setRunning(false);
-    setBaseTime(null);
-  };
-
-  const checkAnswer = async () => {
-    if (submissionLockRef.current) return;
-    submissionLockRef.current = true;
-
-    try {
-      const expr = expression.trim();
-      if (!/\d/.test(expr)) { setResultPopup("invalid"); return; }
-      if (/^[+\-×÷*/)]/.test(expr)) { setResultPopup("invalid"); return; }
-      if (/[+\-×÷*/(]$/.test(expr)) { setResultPopup("invalid"); return; }
-
-      const clean = expr.replace(/×/g, "*").replace(/÷/g, "/").replace(/\^/g, "**").replace(/√(\d+|\([^()]+\))/g, "Math.sqrt($1)");
-      // eslint-disable-next-line no-eval
-      const result = eval(clean);
-      const correct = Number.isFinite(result) && Math.abs(result - target) < 1e-9;
-
-      // stop current timer to avoid duplicates
-      stopTimer();
-
-      if (correct) {
-        playSound("correct");
-        setScore((s) => s + 1);
-        setResultPopup("correct");
-        setSolutionExpr("");
-      } else {
-        playSound("wrong");
-        setResultPopup("wrong");
-        try {
-          const sol = findSolutionBrute(digits, target, disabledOps);
-          setSolutionExpr(sol || "No valid solution found");
-        } catch {
-          setSolutionExpr("No valid solution found");
+    const stopTimer = () => {
+        if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
         }
-      }
+    };
 
-      setHistory((h) => [...h, { round: rounds + 1, result: correct ? target : result, ok: correct }]);
-
-      socket.emit("answerResult", {
+    const socket = useGameSocket({
         nickname,
         mode,
-        result: correct ? target : result,
-        correct,
-        score: correct ? score + 1 : score,
-        round: rounds + 1,
-        clientTime: Date.now(),
-      });
+        page,
+        play,
+        setPage,
+        setPlayerList,
+        setWaitingPlayers,
+        setCanStart,
+        setPreGameInfo,
+        setCountdown,
+        setShowCountdown,
+        setDigits,
+        setOperators,
+        setDisabledOps,
+        setTarget,
+        setMode,
+        setSolutionExpr,
+        setGameState,
+        setIsMyTurn,
+        setRunning,
+        setBaseTime,
+        setTimeLeft,
+        setExpression,
+        setLastWasNumber,
+        setLastWasSqrt,
+        setResultPopup,
+        setSolution,
+        setScore,
+        setRounds,
+        setScores,
+        setEndByName,
+        setReactions,
+        setLatestEmojiPopup,
+        emojiTimeoutsRef,
+        problemRef,
+    });
 
-      let count = 3;
-      setAutoResumeCount(count);
-      const t = setInterval(() => {
-        count -= 1;
-        setAutoResumeCount(count);
-        if (count <= 0) {
-          clearInterval(t);
-          setAutoResumeCount(null);
-          setResultPopup(null);
-          if (isMyTurn) {
-            socket.emit("resumeGame", { mode });
-            setIsMyTurn(false);
-          }
+    /* 🕒 Global tick effect */
+    const timerRef = useGameTimer({
+        running,
+        baseTime,
+        duration: 60, // or mode === "hard" ? 30 : 60 if you prefer dynamic
+        play,
+        problemRef,
+        nickname,
+        score,
+        rounds,
+        mode,
+        isMyTurn,
+        socket,
+        setRunning,
+        setResultPopup,
+        setSolutionExpr,
+        setAutoResumeCount,
+        setIsMyTurn,
+        setTimeLeft,
+    });
+
+    /* ✅ CHECK ANSWER (Smart Validation) */
+    const checkAnswer = () => {
+        handleCheckAnswer({
+            expression,
+            digits,
+            target,
+            disabledOps,
+            play,
+            setResultPopup,
+            setScore,
+            setSolutionExpr,
+            setHistory,
+            rounds,
+            nickname,
+            mode,
+            score,
+            socket,
+            setAutoResumeCount,
+            isMyTurn,
+            setIsMyTurn,
+        });
+    };
+
+    // 👑 HOST CHECK (คงไว้เสมอ เผื่อ JSX ใช้)
+    const isHost = gameState?.turnOrder?.[0] === nickname;
+
+    // 🧨 END GAME FOR ALL (ทุกคนเห็น Game Over popup)
+    const endGameForAll = () => {
+        // กันกดซ้ำ/กันยิงซ้ำขณะอยู่ popup อยู่แล้ว
+        if (resultPopup === "gameover") return;
+
+        try {
+            play("click");
+        } catch {}
+
+        stopTimer();
+        setRunning(false);
+
+        // ให้เราเห็น popupทันที
+        setResultPopup("gameover");
+
+        // แจ้ง server ให้ broadcast ไปทั้งห้อง (ถ้า server รองรับ)
+        if (socket && socket.connected) {
+            socket.emit("endGame", { mode, by: nickname, reason: "endedByPlayer" });
         }
-      }, 1000);
-    } catch (err) {
-      console.error("checkAnswer error", err);
-      setResultPopup("invalid");
-      setSolutionExpr("No valid solution found");
-    } finally {
-      // small debounce before allowing next submit
-      setTimeout(() => { submissionLockRef.current = false; }, 1200);
-    }
-  };
+    };
 
-  const leaveGame = () => {
-    stopTimer();
-    setRunning(false);
-    setResultPopup("gameover");
-    if (socket && socket.connected) socket.emit("playerLeftGame", { nickname, mode });
-    setPage("mode");
-  };
+    // 🚪 LEAVE GAME (เผื่อ JSX ที่ไหนยังเรียกอยู่ จะไม่พังหน้าดำ)
+    // ทำให้พฤติกรรม "ออก" ก็เจอ popup เหมือนคนอื่น (ตามที่คุณต้องการ)
+    const leaveGame = () => {
+        try {
+            play("click");
+        } catch {}
 
-  const endGameForAll = () => {
-    if (resultPopup === "gameover") return;
-    playSoundInternal("click");
-    stopTimer();
-    setRunning(false);
-    setResultPopup("gameover");
-    if (socket && socket.connected) socket.emit("endGame", { mode, by: nickname, reason: "endedByPlayer" });
-  };
+        stopTimer();
+        setRunning(false);
 
-  const currentTheme = themes[theme] || themes.galaxyBlue;
-  const fade = { initial: { opacity: 0, y: 20 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -20 } };
-  const isHost = (gameState?.host === nickname) || (Array.isArray(gameState?.turnOrder) && gameState.turnOrder[0] === nickname);
+        // เห็น popup game over แบบเดียวกัน
+        setResultPopup("gameover");
 
-  /* ---------------- Render (UI) ---------------- */
-  return (
-    <motion.div className="container" style={{ background: currentTheme.background, color: currentTheme.text, minHeight: "100vh" }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.6 }}>
-      {/* Top controls */}
-      <div className="top-controls">
-        <div className="lang-dropdown">
-          <button className="control-btn" onClick={() => setDropdownOpen(dropdownOpen === "lang" ? null : "lang")}><FaGlobe /></button>
-          {dropdownOpen === "lang" && (<div className="dropdown-menu">{Object.keys(texts).map((c) => <div key={c} className={`dropdown-item ${lang === c ? "active" : ""}`} onClick={() => { setLang(c); setDropdownOpen(null); }}>{c.toUpperCase()}</div>)}</div>)}
-        </div>
+        // แจ้ง server ว่าเราออก (server อาจจบเกมถ้าเหลือคนน้อย)
+        if (socket && socket.connected) {
+            socket.emit("playerLeftGame", { nickname, mode });
+        }
+    };
 
-        <div className="theme-dropdown">
-          <button className="control-btn" onClick={() => setDropdownOpen(dropdownOpen === "theme" ? null : "theme")}><FaPalette /></button>
-          {dropdownOpen === "theme" && (<div className="dropdown-menu">{Object.entries(themes).map(([k, v]) => <div key={k} className={`dropdown-item ${theme === k ? "active" : ""}`} onClick={() => { setTheme(k); setDropdownOpen(null); }}>{v.name}</div>)}</div>)}
-        </div>
+    /* ✨ Transition presets */
+    const fade = {
+        initial: { opacity: 0, y: 20 },
+        animate: { opacity: 1, y: 0 },
+        exit: { opacity: 0, y: -20 },
+    };
 
-        <div className="volume-dropdown">
-          <button className="control-btn" onClick={() => setDropdownOpen(dropdownOpen === "volume" ? null : "volume")}><FaVolumeUp /></button>
-          {dropdownOpen === "volume" && (
-            <div className="dropdown-menu volume-menu">
-              <div className="volume-control">
-                <FaVolumeUp className="volume-icon" onClick={() => { setMuted((m) => !m); }} style={{ cursor: "pointer" }} />
-                <input type="range" min="0" max="1" step="0.05" value={muted ? 0 : volume} onChange={(e) => { const val = parseFloat(e.target.value); setVolume(val); setMuted(val === 0); }} className="volume-slider" />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="leaderboard-btn">
-          <button className="control-btn" onClick={() => { playSoundInternal("click"); setPage("leaderboard"); socket.emit("getLeaderboard"); }} title="Leaderboard"><FaTrophy /></button>
-        </div>
-      </div>
-
-      {/* Back button */}
-      {page !== "login" && (
-        <button className="back-btn" onClick={() => {
-          playSoundInternal("click");
-          if (page === "game") {
-            stopTimer();
-            const activeMode = gameState?.mode || mode;
-            if (socket && socket.connected) {
-              socket.emit("playerLeftGame", { nickname, mode: activeMode });
-            }
-            setRunning(false);
-            setIsMyTurn(false);
-            setPage("mode");
-          } else if (page === "waiting" || page === "mode") {
-            if (socket && socket.connected) socket.emit("leaveLobby", nickname);
-            setPage("login");
-          } else {
-            setPage("login");
-          }
-        }}>
-          <FaArrowLeft />
-        </button>
-      )}
-
-      <AnimatePresence mode="wait">
-        {page === "login" && (
-          <motion.div key="login" className="login-page" {...fade}>
-            <div className="glass-card">
-              <h1 className="title">{T.title}</h1>
-              <p className="subtitle">{T.subtitle}</p>
-              <input type="text" placeholder={T.enterName} value={nickname} onChange={(e) => setNickname(e.target.value)} />
-              <button className="main-btn" onClick={() => { if (nickname.trim()) { playSoundInternal("click"); socket.emit("setNickname", nickname); setPage("mode"); } }}>{T.start} <FaArrowRight /></button>
-            </div>
-          </motion.div>
-        )}
-
-        {page === "mode" && (
-          <motion.div key="mode" className="mode-page" {...fade}>
-            <h2 className="big-player">{T.playerName}: <span>{nickname}</span></h2>
-            <div className="online-box glass-card">
-              <h3 className="online-title">👥 {lang === "th" ? "ผู้เล่นที่ออนไลน์" : lang === "zh" ? "在线玩家" : "Players Online"}</h3>
-              {playerList && playerList.length > 0 ? (
-                <ul className="online-list">{playerList.map((p, i) =>p === nickname ? (<li key={i} className="self"><span className="you-label">{lang === "th" ? "คุณ" : lang === "zh" ? "你" : "You"}</span>
-                </li>) : (
-                <li key={i}>{p}</li>))}</ul>) : (<p className="online-empty">{lang === "th"? "ไม่มีผู้เล่นออนไลน์": lang === "zh"? "暂无在线玩家": "No players online"}</p>)}
+    /* 🌌 MAIN UI */
+    return (
+        <motion.div
+            key={theme}
+            className="container"
+            data-theme={theme}
+            style={{
+                background: currentTheme.background,
+                color: currentTheme.text,
+            }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.8 }}
+        >
+            {/* center popup for latest emoji */}
+            {latestEmojiPopup && (
+                <motion.div
+                    initial={{ scale: 0.6, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.6, opacity: 0 }}
+                    transition={{ duration: 0.28 }}
+                    style={{
+                        position: "fixed",
+                        left: "50%",
+                        top: "36%",
+                        transform: "translateX(-50%)",
+                        zIndex: 60,
+                        pointerEvents: "none",
+                        textAlign: "center",
+                        background: "rgba(0,0,0,0.35)",
+                        padding: "12px 18px",
+                        borderRadius: 12,
+                    }}
+                >
+                    <div style={{ fontSize: 44 }}>{latestEmojiPopup.emoji}</div>
+                    <div style={{ fontSize: 12, marginTop: 6, opacity: 0.85 }}>
+                        {latestEmojiPopup.from}
                     </div>
-
-            <h1 className="select-mode-title">{T.selectMode}</h1>
-            <div className="mode-buttons">
-              <button className="mode-btn glass-btn" onClick={() => { playSoundInternal("click"); setMode("easy"); socket.emit("joinGame", { nickname, mode: "easy" }); setPage("waiting"); }}>{T.easy}</button>
-              <button className="mode-btn glass-btn" onClick={() => { playSoundInternal("click"); setMode("hard"); socket.emit("joinGame", { nickname, mode: "hard" }); setPage("waiting"); }}>{T.hard}</button>
-            </div>
-            <div className="personal-best">🏆 Personal Best: {personalBest}</div>
-          </motion.div>
-        )}
-
-        {page === "waiting" && (
-          <motion.div key="waiting" className="waiting-page" {...fade}>
-            <h1 className="waiting-title">{waitingPlayers.length > 1 ? (lang === "th" ? "พร้อมเริ่มเกม!" : lang === "zh" ? "准备开始游戏！" : "Ready to Start!") : (lang === "th" ? "⏳ รอผู้เล่น..." : lang === "zh" ? "⏳ 等待玩家..." : "⏳ Waiting for players...")}</h1>
-            <h2>{lang === "th" ? "โหมด" : lang === "zh" ? "模式" : "Mode"}: <span className="highlight">{mode === "easy" ? T.easy : T.hard}</span></h2>
-            <div className="waiting-box glass-card">{waitingPlayers.length > 0 ? <ul>{waitingPlayers.map((p, i) => <li key={i}>{p}</li>)}</ul> : <p>{lang === "th" ? "ยังไม่มีผู้เล่นในห้องนี้" : lang === "zh" ? "该房间暂无玩家" : "No players yet"}</p>}</div>
-
-            {waitingPlayers.length > 1 && <button className="main-btn" onClick={() => socket.emit("startGame", { mode, nickname })}>🚀 {lang === "th" ? "เริ่มเกม" : lang === "zh" ? "开始游戏" : "Start Game"}</button>}
-
-            <button className="secondary-btn" onClick={() => { playSoundInternal("click"); socket.emit("leaveGame", { nickname, mode }); setPage("mode"); }}>← {lang === "th" ? "ออกจากห้อง" : lang === "zh" ? "离开房间" : "Leave Room"}</button>
-          </motion.div>
-        )}
-
-        {preGameInfo && showCountdown && (
-          <motion.div key="preGame" className="popup countdown-popup" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ type: "spring", stiffness: 120 }}>
-            <h2>{lang === "th" ? `${preGameInfo.starter} เริ่มเกม!` : lang === "zh" ? `${preGameInfo.starter} 开始了游戏！` : `${preGameInfo.starter} started the game!`}</h2>
-            <h1 className="countdown-number">{countdown}</h1>
-          </motion.div>
-        )}
-
-        {page === "game" && (
-          <motion.div key="game" className="game-page" {...fade}>
-            <div className="game-header">
-              <h2 className="big-player">{T.playerName}: <span>{nickname}</span></h2>
-
-              {isMyTurn ? (
-                <>
-                  <h3 className="turn-status">🎯 It's your turn!</h3>
-                  <div className="game-stats">
-                    <p className="round-display">Round: <span className="highlight">{rounds}</span></p>
-                    <h1 className="target-title">{T.target}: <span className="highlight">{target}</span></h1>
-                    <p className={timeLeft <= 10 ? "time-score time-low" : "time-score"}>{T.timeLeft}: {timeLeft}s</p>
-                    <p>{T.score}: {score}</p>
-                  </div>
-                </>
-              ) : (
-                <div className="waiting-header">
-                  <h3 className="turn-status">⏳ Waiting for <span className="highlight">{gameState?.currentTurn ?? "player"}</span>...</h3>
-                  <h1 className={`waiting-time ${timeLeft <= 10 ? "time-critical" : ""}`}>{timeLeft > 0 ? `${timeLeft}s` : "00s"}</h1>
-                </div>
-              )}
-            </div>
-
-            <div className="content">
-              {!isMyTurn ? (
-                <div className="waiting-turn glass-card">
-                  <h2 className="waiting-title">⏳ Waiting...</h2>
-                  <div className="waiting-timer"><h1 className={`time-left ${timeLeft <= 10 ? "time-critical" : ""}`}>{timeLeft > 0 ? `${timeLeft}s` : "00s"}</h1></div>
-                  <p className="hint-text">Please wait until it's your turn.</p>
-                </div>
-              ) : (
-                <>
-                  <div className="digits-grid">{digits.map((n) => {
-                    const used = expression.includes(String(n));
-                    return <button key={n} disabled={lastWasNumber || used} className={`digit-btn ${used ? "used" : ""}`} onClick={() => { playSoundInternal("click"); if (!used && !lastWasNumber) { setExpression((p) => p + n); setLastWasNumber(true); } }}>{n}</button>;
-                  })}</div>
-
-                  <div className="ops-grid">{operators.map((op) => {
-                    const lastChar = expression.slice(-1);
-                    const openCount = (expression.match(/\(/g) || []).length;
-                    const closeCount = (expression.match(/\)/g) || []).length;
-                    const canCloseParen = openCount > closeCount;
-                    const canPressRoot = lastChar === "" || ["+", "-", "×", "÷", "("].includes(lastChar);
-                    const canPressOpenParen = lastChar === "" || ["+", "-", "×", "÷", "("].includes(lastChar);
-                    const canPressCloseParen = lastChar !== "" && /[\d)]$/.test(lastChar) && canCloseParen;
-                    const canPressOperator = lastChar !== "" && !["+", "-", "×", "÷", "("].includes(lastChar);
-
-                    let logicDisabled = false;
-                    if (op === "√" && !canPressRoot) logicDisabled = true;
-                    if (op === "(" && !canPressOpenParen) logicDisabled = true;
-                    if (op === ")" && !canPressCloseParen) logicDisabled = true;
-                    if (["+", "-", "×", "÷"].includes(op) && !canPressOperator) logicDisabled = true;
-
-                    const lockedDisabled = disabledOps.includes(op);
-                    const isDisabled = logicDisabled || lockedDisabled;
-                    const className = lockedDisabled ? "op-btn disabled" : "op-btn";
-
-                    return <button key={op} disabled={isDisabled} className={className} onClick={() => { if (isDisabled) return; playSoundInternal("click"); setExpression((p) => p + op); if (["+", "-", "×", "÷", "(", "√"].includes(op)) setLastWasNumber(false); else if (op === ")") setLastWasNumber(true); }}>{op}</button>;
-                  })}</div>
-
-                  <input className="expression-box" readOnly value={expression} placeholder={T.buildEq} />
-
-                  <div className="action-row">
-                    <button className="equal-btn glass-btn" onClick={() => { playSoundInternal("click"); setExpression((p) => p.slice(0, -1)); setLastWasNumber(false); }}>{T.delete}</button>
-                    <button className="equal-btn glass-btn" onClick={checkAnswer} disabled={submissionLockRef.current || digits.some((d) => !expression.includes(String(d)))}>{T.submit}</button>
-                    <button className="skip-btn glass-btn" onClick={() => { playSoundInternal("click"); socket.emit("skipTurn", { mode, nickname }); setIsMyTurn(false); setRunning(false); setTimeLeft(mode === "hard" ? 30 : 60); setExpression(""); }}>⏭️ Skip Turn</button>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {resultPopup && resultPopup !== "endRound" && (
-              <motion.div className={`popup ${resultPopup === "invalid" ? "invalid" : ""}`} initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 120 }}>
-                {resultPopup === "correct" && <h2>{T.correct}</h2>}
-                {resultPopup === "wrong" && (<><h2>{T.wrong}</h2><p className="solution-text">💡 {T.solution}: <br /><span className="solution-highlight">{solutionExpr}</span></p></>)}
-                {resultPopup === "timeout" && (<><h2>{T.timeout}</h2><p className="solution-text">💡 {T.solution}: <br /><span className="solution-highlight">{solutionExpr}</span></p></>)}
-                {resultPopup === "invalid" && <h2>{T.invalidExpr}</h2>}
-                {resultPopup === "gameover" && (<><h2>💀 Game Over</h2><p className="solution-text">Not enough players to continue.</p></>)}
-
-                {autoResumeCount !== null && <p className="resume-count">Resuming next turn in <span className="highlight">{autoResumeCount}</span>s...</p>}
-
-                {autoResumeCount === null && (<div className="popup-btns"><button onClick={() => { playSoundInternal("click"); startGame(mode); }}><FaRedo /> {T.playAgain}</button><button onClick={() => { playSoundInternal("click"); stopTimer(); setPage("stats"); }}><FaSignOutAlt /> {T.exit}</button></div>)}
-              </motion.div>
+                </motion.div>
             )}
-          </motion.div>
-        )}
 
-        {page === "stats" && (
-          <motion.div key="stats" {...fade} className="stats-page">
-            <div className="stats-card">
-              <h2 className="stats-title">{T.stats}</h2>
-              <div className="scoreboard glass-card" style={{ padding: 16 }}>
-                <table style={{ width: "100%" }}>
-                  <thead><tr><th>{lang === "th" ? "ผู้เล่น" : lang === "zh" ? "玩家" : "Player"}</th><th style={{ textAlign: "right" }}>{lang === "th" ? "คะแนน" : lang === "zh" ? "分数" : "Score"}</th></tr></thead>
-                  <tbody>{Object.entries(scores || {}).map(([name, sc]) => (<tr key={name}><td>{name === nickname ? <span className="you-label">{lang === "th" ? "คุณ" : lang === "zh" ? "你" : "You"}</span> : null}{name}</td><td style={{ textAlign: "right" }}><strong>{sc}</strong></td></tr>))}</tbody>
-                </table>
-              </div>
+            {/* 🌍 TOP CONTROLS */}
+            <div className="top-controls">
+                <LanguageDropdown
+                    dropdownOpen={dropdownOpen}
+                    setDropdownOpen={setDropdownOpen}
+                    texts={texts}
+                    lang={lang}
+                    setLang={setLang}
+                />
 
-              <div className="stats-actions" style={{ marginTop: 16 }}><button className="main-btn" onClick={() => { playSoundInternal("click"); setPage("mode"); }}><FaArrowLeft /> {T.back}</button></div>
+                <ThemeDropdown
+                    dropdownOpen={dropdownOpen}
+                    setDropdownOpen={setDropdownOpen}
+                    themes={themes}
+                    theme={theme}
+                    setTheme={setTheme}
+                />
+
+                <VolumeDropdown
+                    dropdownOpen={dropdownOpen}
+                    setDropdownOpen={setDropdownOpen}
+                    volume={volume}
+                    muted={muted}
+                    setVolume={setVolume}
+                    toggleMute={toggleMute}
+                />
             </div>
-          </motion.div>
-        )}
 
-        {page === "leaderboard" && (
-          <motion.div key="leaderboard" {...fade} className="leaderboard-page">
-            <div className="glass-card leaderboard-card">
-              <h2 className="leaderboard-title">🏆 Leaderboard</h2>
-              <p className="leaderboard-sub">Top players (session)</p>
+            {/* 🔙 Back Button */}
+            {page !== "login" && (
+                <button
+                    className="back-btn"
+                    onClick={() => {
+                        play("click");
 
-              <ol className="leaderboard-list">
-                {leaderboard && leaderboard.length ? (
-                  leaderboard.map((p, i) => (
-                    <li key={p.nickname} className={p.nickname === nickname ? "self" : ""}>
-                      <span className="rank">#{i + 1}</span>
-                      <span className="name">{p.nickname}</span>
-                      <span className="points">{p.points ?? 0} pts</span>
-                      <span className="wins">{p.wins ?? 0}✔</span>
-                    </li>
-                  ))
-                ) : (
-                  <p>No leaderboard data yet.</p>
-                )}
-              </ol>
+                        if (page === "game") {
+                            stopTimer();
 
-              <div className="stats-actions">
-                <button className="main-btn" onClick={() => { playSoundInternal("click"); setPage("mode"); }}>
-                  <FaArrowLeft /> {T.back}
+                            // ✅ ใช้ mode จาก gameState ถ้ามี (กัน state ค้าง)
+                            const activeMode = gameState?.mode || mode;
+
+                            socket.emit("playerLeftGame", {
+                                nickname,
+                                mode: activeMode,
+                            });
+
+                            setRunning(false);
+                            setIsMyTurn(false);
+                            setPage("mode"); // กลับไปหน้าเลือกโหมด
+                        } else if (page === "waiting" || page === "mode") {
+                            socket.emit("leaveLobby", nickname);
+                            socket.disconnect();
+                            setPage("login");
+                        } else {
+                            setPage("login");
+                        }
+                    }}
+                >
+                    <FaArrowLeft />
                 </button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            )}
 
-      {reactionPopup && <div className="reaction-popup">{reactionPopup}</div>}
-    </motion.div>
-  );
+            {/* ⚡ PAGE SWITCHER */}
+            <AnimatePresence mode="wait">
+                {/* LOGIN PAGE ------------------------------------------------ */}
+                {page === "login" && (
+                    <LoginPage
+                        T={T}
+                        nickname={nickname}
+                        setNickname={setNickname}
+                        play={play}
+                        socket={socket}
+                        setPage={setPage}
+                        fade={fade}
+                    />
+                )}
+
+                {/* INTRO PAGE (integrated) ------------------------------------------------ */}
+                {page === "intro" && (
+                    <IntroPage
+                        T={T}
+                        nickname={nickname}
+                        lang={lang}
+                        play={play}
+                        setPage={setPage}
+                        fade={fade}
+                    />
+                )}
+
+                {/* MODE PAGE ------------------------------------------------ */}
+                {page === "mode" && (
+                    <ModePage
+                        T={T}
+                        lang={lang}
+                        nickname={nickname}
+                        reactions={reactions}
+                        playerList={playerList}
+                        play={play}
+                        socket={socket}
+                        setMode={setMode}
+                        setPage={setPage}
+                        fade={fade}
+                    />
+                )}
+
+                {/* WAITING ROOM PAGE ------------------------------------------------ */}
+                {page === "waiting" && (
+                    <WaitingPage
+                        T={T}
+                        lang={lang}
+                        mode={mode}
+                        nickname={nickname}
+                        waitingPlayers={waitingPlayers}
+                        reactions={reactions}
+                        play={play}
+                        socket={socket}
+                        setPage={setPage}
+                        fade={fade}
+                    />
+                )}
+
+                {/* PRE-GAME POPUP ------------------------------------------------ */}
+                {preGameInfo && countdown > 0 && (
+                    <motion.div
+                        key="preGame"
+                        className="popup countdown-popup"
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ type: "spring", stiffness: 120 }}
+                    >
+                        <h2>
+                            {lang === "th"
+                                ? `${preGameInfo.starter} เริ่มเกม!`
+                                : lang === "zh"
+                                  ? `${preGameInfo.starter} 开始了游戏！`
+                                  : `${preGameInfo.starter} started the game!`}
+                        </h2>
+                        <h1 className="countdown-number">{countdown}</h1>
+                    </motion.div>
+                )}
+
+                {/* GAME PAGE ------------------------------------------------ */}
+                {page === "game" && (
+                    <GamePage
+                        T={T}
+                        lang={lang}
+                        nickname={nickname}
+                        reactions={reactions}
+                        dropdownOpen={dropdownOpen}
+                        setDropdownOpen={setDropdownOpen}
+                        isHost={isHost}
+                        isMyTurn={isMyTurn}
+                        endGameForAll={endGameForAll}
+                        leaveGame={leaveGame}
+                        sendEmoji={sendEmoji}
+                        gameState={gameState}
+                        rounds={rounds}
+                        timeLeft={timeLeft}
+                        score={score}
+                        digits={digits}
+                        operators={operators}
+                        disabledOps={disabledOps}
+                        expression={expression}
+                        lastWasNumber={lastWasNumber}
+                        lastWasSqrt={lastWasSqrt}
+                        solutionExpr={solutionExpr}
+                        resultPopup={resultPopup}
+                        endByName={endByName}
+                        autoResumeCount={autoResumeCount}
+                        play={play}
+                        setExpression={setExpression}
+                        setLastWasNumber={setLastWasNumber}
+                        setLastWasSqrt={setLastWasSqrt}
+                        stopTimer={stopTimer}
+                        startGame={startGame}
+                        setPage={setPage}
+                        checkAnswer={checkAnswer}
+                        fade={fade}
+                        target={target}
+                    />
+                )}
+
+                {resultPopup === "endRound" && (
+                    <motion.div
+                        className="popup"
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        transition={{ type: "spring", stiffness: 120 }}
+                    >
+                        <h2>🏁 End of Round {rounds}</h2>
+                        <p className="solution-text">
+                            {lang === "th"
+                                ? "รอบนี้จบแล้ว! พร้อมเริ่มรอบถัดไปหรือไม่?"
+                                : "Round complete! Ready for the next one?"}
+                        </p>
+                        <div className="popup-btns">
+                            <button
+                                onClick={() => {
+                                    play("click");
+                                    socket.emit("resumeGame", { mode });
+                                    setResultPopup(null);
+                                }}
+                            >
+                                <FaRedo /> {T.playAgain}
+                            </button>
+                            <button
+                                onClick={() => {
+                                    play("click");
+                                    socket.emit("playerLeftGame", { nickname, mode });
+                                    setPage("login");
+                                }}
+                            >
+                                <FaSignOutAlt /> {T.exit}
+                            </button>
+                        </div>
+                    </motion.div>
+                )}
+                {page === "stats" && (
+                    <motion.div key="stats" {...fade} className="stats-page">
+                        <div className="stats-card">
+                            <h2 className="stats-title">{T.stats}</h2>
+
+                            {(() => {
+                                // ✅ รายชื่อ + คะแนนจาก state (ถ้ามี)
+                                const entries = Object.entries(scores ?? {});
+
+                                // ✅ Fallback รายชื่อผู้เล่น หาก scores ยังว่าง
+                                const turnOrder = Array.isArray(gameState?.turnOrder)
+                                    ? gameState.turnOrder
+                                    : [];
+                                const waiters = Array.isArray(waitingPlayers)
+                                    ? waitingPlayers
+                                    : [];
+                                const basePlayers = [
+                                    ...new Set(
+                                        [...turnOrder, ...waiters, nickname].filter(
+                                            Boolean
+                                        )
+                                    ),
+                                ];
+
+                                // ✅ สร้าง rowsRaw เสมอ (ถ้าไม่มีคะแนน ให้เป็น 0)
+                                const rowsRaw =
+                                    entries.length > 0
+                                        ? entries // [['A',1],['B',0], ...]
+                                        : basePlayers.map((name) => [name, 0]);
+
+                                if (rowsRaw.length === 0) {
+                                    return (
+                                        <p style={{ textAlign: "center", marginTop: 12 }}>
+                                            {lang === "th"
+                                                ? "ยังไม่มีผู้เล่น"
+                                                : lang === "zh"
+                                                  ? "暂无玩家"
+                                                  : "No players yet"}
+                                        </p>
+                                    );
+                                }
+
+                                // ✅ เรียงคะแนน มาก→น้อย
+                                const sorted = [...rowsRaw].sort((a, b) => b[1] - a[1]);
+                                const [winName, winScore] = sorted[0];
+
+                                return (
+                                    <>
+                                        {/* 🏆 Winner */}
+                                        <div
+                                            className="winner-banner"
+                                            style={{
+                                                margin: "8px 0 16px",
+                                                textAlign: "center",
+                                            }}
+                                        >
+                                            <h3 style={{ margin: 0 }}>
+                                                🏆{" "}
+                                                {lang === "th"
+                                                    ? "ผู้ชนะ"
+                                                    : lang === "zh"
+                                                      ? "获胜者"
+                                                      : "Winner"}
+                                                :{" "}
+                                                <span className="highlight">
+                                                    {winName}
+                                                </span>
+                                            </h3>
+                                            <p style={{ marginTop: 6 }}>
+                                                {lang === "th"
+                                                    ? "คะแนน"
+                                                    : lang === "zh"
+                                                      ? "分数"
+                                                      : "Score"}
+                                                : <strong>{winScore}</strong>
+                                            </p>
+                                        </div>
+
+                                        {/* 📊 Scoreboard: ผู้เล่นทั้งหมด */}
+                                        <div
+                                            className="scoreboard glass-card"
+                                            style={{ padding: 16 }}
+                                        >
+                                            <table
+                                                style={{
+                                                    width: "100%",
+                                                    borderCollapse: "separate",
+                                                    borderSpacing: "0 8px",
+                                                }}
+                                            >
+                                                <thead>
+                                                    <tr>
+                                                        <th style={{ textAlign: "left" }}>
+                                                            {lang === "th"
+                                                                ? "ผู้เล่น"
+                                                                : lang === "zh"
+                                                                  ? "玩家"
+                                                                  : "Player"}
+                                                        </th>
+                                                        <th
+                                                            style={{ textAlign: "right" }}
+                                                        >
+                                                            {lang === "th"
+                                                                ? "คะแนน"
+                                                                : lang === "zh"
+                                                                  ? "分数"
+                                                                  : "Score"}
+                                                        </th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {sorted.map(([name, sc]) => (
+                                                        <tr key={name}>
+                                                            <td>
+                                                                {name === nickname ? (
+                                                                    <span
+                                                                        className="you-label"
+                                                                        style={{
+                                                                            marginRight: 6,
+                                                                        }}
+                                                                    >
+                                                                        {lang === "th"
+                                                                            ? "คุณ"
+                                                                            : lang ===
+                                                                                "zh"
+                                                                              ? "你"
+                                                                              : "You"}
+                                                                    </span>
+                                                                ) : null}
+                                                                {name}
+                                                                {reactions[name] && (
+                                                                    <span
+                                                                        style={{
+                                                                            marginLeft: 8,
+                                                                        }}
+                                                                    >
+                                                                        {
+                                                                            reactions[
+                                                                                name
+                                                                            ].emoji
+                                                                        }
+                                                                    </span>
+                                                                )}
+                                                                {name === winName && (
+                                                                    <span
+                                                                        style={{
+                                                                            marginLeft: 8,
+                                                                        }}
+                                                                    >
+                                                                        🏆
+                                                                    </span>
+                                                                )}
+                                                            </td>
+                                                            <td
+                                                                style={{
+                                                                    textAlign: "right",
+                                                                }}
+                                                            >
+                                                                <strong>{sc}</strong>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </>
+                                );
+                            })()}
+
+                            {/* 🔙 Back */}
+                            <div className="stats-actions" style={{ marginTop: 16 }}>
+                                <button
+                                    className="main-btn"
+                                    onClick={() => {
+                                        play("click");
+                                        setPage("mode");
+                                    }}
+                                >
+                                    <FaArrowLeft /> {T.back}
+                                </button>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </motion.div>
+    );
 }
