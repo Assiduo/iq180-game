@@ -39,7 +39,7 @@ export function createExpressionWithResult(
   let attempts = 0;
   let result = 0;
 
-  while (( !Number.isInteger(result) || result <= 0 ) && attempts < maxAttempts) {
+  while ((!Number.isInteger(result) || result <= 0) && attempts < maxAttempts) {
     attempts++;
     expr = "";
 

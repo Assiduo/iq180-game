@@ -24,7 +24,9 @@ const roundLock = { easy: false, hard: false };
 
 /* 🧰 ADMIN API ------------------------------------------------------- */
 app.get("/admin/clients", (_req, res) => {
-  const online = Object.values(players).filter((p) => p.isOnline).map((p) => p.nickname);
+  const online = Object.values(players)
+    .filter((p) => p.isOnline)
+    .map((p) => p.nickname);
 
   const rooms = Object.fromEntries(
     Object.entries(gameRooms).map(([mode, r]) => [
@@ -74,7 +76,10 @@ function createExpressionWithResult(numbers, ops, mode, disabledOps = []) {
   const nums = shuffle(numbers);
   const allowedOps = ops.filter((op) => !disabledOps.includes(op));
   const perfectSquares = new Set([1, 4, 9]);
-  const canUseRoot = mode === "hard" && allowedOps.includes("√") && nums.some((n) => perfectSquares.has(n));
+  const canUseRoot =
+    mode === "hard" &&
+    allowedOps.includes("√") &&
+    nums.some((n) => perfectSquares.has(n));
 
   let expr = "";
   let result = 0;
@@ -86,14 +91,24 @@ function createExpressionWithResult(numbers, ops, mode, disabledOps = []) {
     let prev = ""; // track previous token type
     for (let i = 0; i < nums.length; i++) {
       // randomly open paren (rare)
-      if (mode === "hard" && Math.random() < 0.18 && i < nums.length - 2 && openParen === 0) {
+      if (
+        mode === "hard" &&
+        Math.random() < 0.18 &&
+        i < nums.length - 2 &&
+        openParen === 0
+      ) {
         s += "(";
         openParen++;
         prev = "(";
       }
 
       // optionally place a root before a perfect square
-      if (canUseRoot && Math.random() < 0.28 && perfectSquares.has(nums[i]) && (prev === "" || /[+\-×÷(]/.test(prev))) {
+      if (
+        canUseRoot &&
+        Math.random() < 0.28 &&
+        perfectSquares.has(nums[i]) &&
+        (prev === "" || /[+\-×÷(]/.test(prev))
+      ) {
         s += "√";
         prev = "√";
       }
@@ -142,7 +157,10 @@ function createExpressionWithResult(numbers, ops, mode, disabledOps = []) {
     if (/\)√/.test(expr)) continue;
 
     try {
-      const clean = expr.replace(/×/g, "*").replace(/÷/g, "/").replace(/√(\d+|\([^()]+\))/g, "Math.sqrt($1)");
+      const clean = expr
+        .replace(/×/g, "*")
+        .replace(/÷/g, "/")
+        .replace(/√(\d+|\([^()]+\))/g, "Math.sqrt($1)");
       const val = eval(clean);
       if (!Number.isFinite(val)) continue;
       // if root used ensure root arguments are perfect squares
@@ -225,7 +243,9 @@ function generateProblem(mode) {
 
 /* 🔍 HELPERS -------------------------------------------------------- */
 function updatePlayerList() {
-  const list = Object.values(players).filter((p) => p.isOnline).map((p) => p.nickname);
+  const list = Object.values(players)
+    .filter((p) => p.isOnline)
+    .map((p) => p.nickname);
   io.emit("playerList", list);
 }
 
@@ -422,7 +442,9 @@ io.on("connection", (socket) => {
       time: timeTaken,
     });
 
-    console.log(`🧩 ${data.nickname} answered ${data.correct ? "✅" : "❌"} in ${timeTaken.toFixed(2)}s`);
+    console.log(
+      `🧩 ${data.nickname} answered ${data.correct ? "✅" : "❌"} in ${timeTaken.toFixed(2)}s`
+    );
 
     // If all players have answered or exhaustive condition
     if (room.answers.length >= room.players.length) {
@@ -479,7 +501,10 @@ io.on("connection", (socket) => {
       const nextTurn = room.turnOrder[room.currentTurnIndex];
       room.currentTurn = nextTurn;
 
-      io.to(mode).emit("turnSwitch", { nextTurn, currentTurnIndex: room.currentTurnIndex });
+      io.to(mode).emit("turnSwitch", {
+        nextTurn,
+        currentTurnIndex: room.currentTurnIndex,
+      });
 
       const nextSocket = findSocketIdByNickname(nextTurn);
       if (nextSocket) io.to(nextSocket).emit("yourTurn", { mode });
@@ -514,8 +539,13 @@ io.on("connection", (socket) => {
     if (!player) return;
     console.log(`🔴 ${player.nickname} disconnected (${socket.id})`);
     if (player.mode && waitingRooms[player.mode]) {
-      waitingRooms[player.mode] = waitingRooms[player.mode].filter((p) => p !== player.nickname);
-      io.to(player.mode).emit("waitingList", { mode: player.mode, players: waitingRooms[player.mode] });
+      waitingRooms[player.mode] = waitingRooms[player.mode].filter(
+        (p) => p !== player.nickname
+      );
+      io.to(player.mode).emit("waitingList", {
+        mode: player.mode,
+        players: waitingRooms[player.mode],
+      });
     }
     player.isOnline = false;
     updatePlayerList();

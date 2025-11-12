@@ -47,11 +47,7 @@ export default function LoginPage({
           }}
         />
 
-        <button
-          className="main-btn"
-          onClick={submit}
-          aria-label="Start"
-        >
+        <button className="main-btn" onClick={submit} aria-label="Start">
           {T.start} <FaArrowRight />
         </button>
       </div>

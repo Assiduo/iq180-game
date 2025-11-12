@@ -32,9 +32,12 @@ export function checkAnswerCore({ expression, digits, target, disabledOps = [] }
   if (!expr) return { valid: false, correct: false, result: null, reason: "empty" };
 
   // Basic validity checks
-  if (!/\d/.test(expr)) return { valid: false, correct: false, result: null, reason: "no_digit" };
-  if (/^[+\-×÷*/)]/.test(expr)) return { valid: false, correct: false, result: null, reason: "bad_start" };
-  if (/[+\-×÷*/(]$/.test(expr)) return { valid: false, correct: false, result: null, reason: "bad_end" };
+  if (!/\d/.test(expr))
+    return { valid: false, correct: false, result: null, reason: "no_digit" };
+  if (/^[+\-×÷*/)]/.test(expr))
+    return { valid: false, correct: false, result: null, reason: "bad_start" };
+  if (/[+\-×÷*/(]$/.test(expr))
+    return { valid: false, correct: false, result: null, reason: "bad_end" };
 
   // Evaluate safely
   try {

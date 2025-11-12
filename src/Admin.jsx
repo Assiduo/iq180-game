@@ -25,7 +25,7 @@ export default function Admin() {
           background: "radial-gradient(circle at 80% 20%, #2a001f, #000000 80%)",
           text: "#ffe6ff",
         },
-      }[theme]),
+      })[theme],
     [theme]
   );
 
@@ -117,7 +117,11 @@ export default function Admin() {
   return (
     <motion.div
       className="container"
-      style={{ background: currentTheme.background, color: currentTheme.text, minHeight: "100vh" }}
+      style={{
+        background: currentTheme.background,
+        color: currentTheme.text,
+        minHeight: "100vh",
+      }}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.5 }}
@@ -125,10 +129,15 @@ export default function Admin() {
       <motion.div className="login-page" {...fade}>
         <div className="glass-card" style={{ maxWidth: 1100, width: "100%" }}>
           <h1 className="title">IQ180 — Server Admin</h1>
-          <p className="subtitle">Monitor online clients & rooms. Reset game state when needed.</p>
+          <p className="subtitle">
+            Monitor online clients & rooms. Reset game state when needed.
+          </p>
 
           {/* Stats and controls */}
-          <div className="mode-buttons" style={{ display: "grid", gap: 12, gridTemplateColumns: "1fr 1fr" }}>
+          <div
+            className="mode-buttons"
+            style={{ display: "grid", gap: 12, gridTemplateColumns: "1fr 1fr" }}
+          >
             <div className="glass-card" style={{ padding: 16 }}>
               <h3>Online Clients</h3>
               <p style={{ fontSize: 28, margin: 0 }}>
@@ -173,7 +182,9 @@ export default function Admin() {
             {loading ? (
               <div style={{ padding: 12 }}>Loading…</div>
             ) : roomKeys.length === 0 ? (
-              <div style={{ padding: 12, color: "rgba(255,255,255,0.7)" }}>No active rooms</div>
+              <div style={{ padding: 12, color: "rgba(255,255,255,0.7)" }}>
+                No active rooms
+              </div>
             ) : (
               <div
                 style={{
@@ -221,8 +232,8 @@ export default function Admin() {
                             {modeKey === "easy"
                               ? "Normal Mode"
                               : modeKey === "hard"
-                              ? "Genius Mode"
-                              : modeKey}
+                                ? "Genius Mode"
+                                : modeKey}
                           </h4>
                           <div
                             style={{
@@ -374,9 +385,7 @@ export default function Admin() {
                                   padding: "6px 8px",
                                   borderRadius: 8,
                                   background:
-                                    t === current
-                                      ? "#FFC43C"
-                                      : "rgba(255,255,255,0.03)",
+                                    t === current ? "#FFC43C" : "rgba(255,255,255,0.03)",
                                   fontWeight: t === current ? 700 : 500,
                                   marginBottom: 4,
                                 }}

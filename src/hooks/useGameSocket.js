@@ -4,7 +4,10 @@ import { generateProblem } from "../utils/problemGenerator";
 
 // ✅ Connect to backend server
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:4000";
-const socket = io(SERVER_URL, { autoConnect: true, transports: ["websocket", "polling"] });
+const socket = io(SERVER_URL, {
+  autoConnect: true,
+  transports: ["websocket", "polling"],
+});
 
 /**
  * Custom hook for game socket events
@@ -118,8 +121,8 @@ export default function useGameSocket({
         Array.isArray(data.players) && data.players.length > 0
           ? data.players
           : Array.isArray(data.turnOrder)
-          ? data.turnOrder
-          : [];
+            ? data.turnOrder
+            : [];
       const uniquePlayers = Array.from(new Set([...list, nickname]));
       setScores(Object.fromEntries(uniquePlayers.map((p) => [p, 0])));
 

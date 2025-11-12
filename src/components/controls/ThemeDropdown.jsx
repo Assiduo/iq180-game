@@ -11,9 +11,7 @@ export default function ThemeDropdown({
     <div className="theme-dropdown">
       <button
         className="control-btn"
-        onClick={() =>
-          setDropdownOpen(dropdownOpen === "theme" ? null : "theme")
-        }
+        onClick={() => setDropdownOpen(dropdownOpen === "theme" ? null : "theme")}
       >
         <FaPalette />
       </button>

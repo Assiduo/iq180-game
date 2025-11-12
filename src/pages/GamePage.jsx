@@ -78,9 +78,7 @@ export default function GamePage({
           <div style={{ position: "relative" }}>
             <button
               className="glass-btn"
-              onClick={() =>
-                setDropdownOpen(dropdownOpen === "emoji" ? null : "emoji")
-              }
+              onClick={() => setDropdownOpen(dropdownOpen === "emoji" ? null : "emoji")}
               title="Send emoji"
             >
               😊
@@ -158,8 +156,8 @@ export default function GamePage({
         ) : (
           <div className="waiting-header">
             <h3 className="turn-status">
-              ⏳ Waiting for{" "}
-              <span className="highlight">{gameState?.currentTurn}</span>...
+              ⏳ Waiting for <span className="highlight">{gameState?.currentTurn}</span>
+              ...
             </h3>
             <h1 className={`waiting-time ${timeLeft <= 10 ? "time-critical" : ""}`}>
               {timeLeft > 0 ? `${timeLeft}s` : "00s"}
@@ -177,8 +175,7 @@ export default function GamePage({
       {!isMyTurn ? (
         <div className="waiting-turn glass-card">
           <h2 className="waiting-title">
-            ⏳ Waiting for{" "}
-            <span className="highlight">{gameState?.currentTurn}</span>...
+            ⏳ Waiting for <span className="highlight">{gameState?.currentTurn}</span>...
           </h2>
           <div className="waiting-timer">
             <h1 className={`time-left ${timeLeft <= 10 ? "time-critical" : ""}`}>
@@ -333,8 +330,7 @@ export default function GamePage({
               <h2>💀 Game Over</h2>
               {endByName && (
                 <p className="solution-text">
-                  🛑 {T.endedBy}:{" "}
-                  <span className="solution-highlight">{endByName}</span>
+                  🛑 {T.endedBy}: <span className="solution-highlight">{endByName}</span>
                 </p>
               )}
               <p className="solution-text">{T.notEnoughPlayers}</p>
@@ -343,8 +339,8 @@ export default function GamePage({
 
           {autoResumeCount !== null && (
             <p className="resume-count">
-              Resuming next turn in{" "}
-              <span className="highlight">{autoResumeCount}</span>s...
+              Resuming next turn in <span className="highlight">{autoResumeCount}</span>
+              s...
             </p>
           )}
 

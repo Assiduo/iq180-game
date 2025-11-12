@@ -79,8 +79,7 @@ function createExpressionWithResult(numbers, ops, mode, disabledOps = []) {
     expr = "";
     for (let i = 0; i < nums.length; i++) {
       let n = nums[i];
-      if (mode === "hard" && allowedOps.includes("√") && Math.random() < 0.3)
-        n = `√${n}`;
+      if (mode === "hard" && allowedOps.includes("√") && Math.random() < 0.3) n = `√${n}`;
       expr += n;
       if (i < nums.length - 1)
         expr += allowedOps[Math.floor(Math.random() * allowedOps.length)];
@@ -213,7 +212,9 @@ function nextTurn(mode) {
     const startTime = Date.now();
     const roundTime = room.mode === "hard" ? 30 : 60;
     io.to(mode).emit("syncTimer", { mode, startTime });
-    console.log(`🕒 [${mode}] syncTimer emitted (start: ${new Date(startTime).toLocaleTimeString()}) for player ${nextPlayer}`);
+    console.log(
+      `🕒 [${mode}] syncTimer emitted (start: ${new Date(startTime).toLocaleTimeString()}) for player ${nextPlayer}`
+    );
 
     // notify the next player's socket to begin their UI turn
     const nextSocketId = findSocketIdByNickname(nextPlayer);
@@ -428,7 +429,9 @@ io.on("connection", (socket) => {
     console.log(`🔴 ${player.nickname} disconnected (${socket.id})`);
 
     if (player.mode && waitingRooms[player.mode]) {
-      waitingRooms[player.mode] = waitingRooms[player.mode].filter((p) => p !== player.nickname);
+      waitingRooms[player.mode] = waitingRooms[player.mode].filter(
+        (p) => p !== player.nickname
+      );
       io.to(player.mode).emit("waitingList", {
         mode: player.mode,
         players: waitingRooms[player.mode],
@@ -457,7 +460,6 @@ io.on("connection", (socket) => {
       console.log(`💬 [emoji] ${payload.nickname} -> all: ${payload.emoji}`);
     }
   });
-
 });
 
 /* 🟢 START SERVER ---------------------------------------------------- */

@@ -44,13 +44,7 @@ export default function WaitingPage({
             ))}
           </ul>
         ) : (
-          <p>
-            {getText(
-              "ยังไม่มีผู้เล่นในห้องนี้",
-              "该房间暂无玩家",
-              "No players yet"
-            )}
-          </p>
+          <p>{getText("ยังไม่มีผู้เล่นในห้องนี้", "该房间暂无玩家", "No players yet")}</p>
         )}
       </div>
 

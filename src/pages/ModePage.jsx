@@ -32,8 +32,8 @@ export default function ModePage({
           {lang === "th"
             ? "ผู้เล่นที่ออนไลน์"
             : lang === "zh"
-            ? "在线玩家"
-            : "Players Online"}
+              ? "在线玩家"
+              : "Players Online"}
         </h3>
 
         {playerList && playerList.length > 0 ? (
@@ -42,11 +42,7 @@ export default function ModePage({
               <li key={i} className={p === nickname ? "self" : ""}>
                 {p === nickname ? (
                   <span className="you-label">
-                    {lang === "th"
-                      ? "คุณ"
-                      : lang === "zh"
-                      ? "你"
-                      : "You"}
+                    {lang === "th" ? "คุณ" : lang === "zh" ? "你" : "You"}
                   </span>
                 ) : (
                   p
@@ -64,8 +60,8 @@ export default function ModePage({
             {lang === "th"
               ? "ไม่มีผู้เล่นออนไลน์"
               : lang === "zh"
-              ? "暂无在线玩家"
-              : "No players online"}
+                ? "暂无在线玩家"
+                : "No players online"}
           </p>
         )}
       </div>

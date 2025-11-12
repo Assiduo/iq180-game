@@ -11,9 +11,7 @@ export default function LanguageDropdown({
     <div className="lang-dropdown">
       <button
         className="control-btn"
-        onClick={() =>
-          setDropdownOpen(dropdownOpen === "lang" ? null : "lang")
-        }
+        onClick={() => setDropdownOpen(dropdownOpen === "lang" ? null : "lang")}
       >
         <FaGlobe />
       </button>

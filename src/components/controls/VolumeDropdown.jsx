@@ -12,9 +12,7 @@ export default function VolumeDropdown({
     <div className="volume-dropdown">
       <button
         className="control-btn"
-        onClick={() =>
-          setDropdownOpen(dropdownOpen === "volume" ? null : "volume")
-        }
+        onClick={() => setDropdownOpen(dropdownOpen === "volume" ? null : "volume")}
       >
         <FaVolumeUp />
       </button>

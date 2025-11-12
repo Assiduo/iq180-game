@@ -73,19 +73,22 @@ export default function useSound({ initialVolume = 0.4, disableBgm = false } = {
   }, [muted, volume]);
 
   // setter that ensures volume bounds and updates muted flag
-  const setVolume = useCallback((v) => {
-    const vol = Math.max(0, Math.min(1, v || 0));
-    setVolumeState(vol);
-    if (vol === 0) setMuted(true);
-    else setMuted(false);
+  const setVolume = useCallback(
+    (v) => {
+      const vol = Math.max(0, Math.min(1, v || 0));
+      setVolumeState(vol);
+      if (vol === 0) setMuted(true);
+      else setMuted(false);
 
-    if (bgmRef.current) {
-      try {
-        bgmRef.current.volume(vol);
-        if (!muted && !bgmRef.current.playing()) bgmRef.current.play();
-      } catch {}
-    }
-  }, [muted]);
+      if (bgmRef.current) {
+        try {
+          bgmRef.current.volume(vol);
+          if (!muted && !bgmRef.current.playing()) bgmRef.current.play();
+        } catch {}
+      }
+    },
+    [muted]
+  );
 
   // toggle mute/unmute (keeps previous volume handling simple)
   const toggleMute = useCallback(() => {
@@ -106,36 +109,39 @@ export default function useSound({ initialVolume = 0.4, disableBgm = false } = {
   }, [volume]);
 
   // play a named sound
-  const play = useCallback((type) => {
-    if (muted) return;
+  const play = useCallback(
+    (type) => {
+      if (muted) return;
 
-    try {
-      switch (type) {
-        case "click":
-          clickRef.current?.play();
-          break;
-        case "correct":
-          correctRef.current?.play();
-          break;
-        case "wrong":
-          wrongRef.current?.play();
-          break;
-        case "timeout":
-          timeoutRef.current?.play();
-          break;
-        case "bgm":
-          if (bgmRef.current && !bgmRef.current.playing()) bgmRef.current.play();
-          break;
-        default:
-          // allow playing raw Howl refs by key if you expand mapping
-          break;
+      try {
+        switch (type) {
+          case "click":
+            clickRef.current?.play();
+            break;
+          case "correct":
+            correctRef.current?.play();
+            break;
+          case "wrong":
+            wrongRef.current?.play();
+            break;
+          case "timeout":
+            timeoutRef.current?.play();
+            break;
+          case "bgm":
+            if (bgmRef.current && !bgmRef.current.playing()) bgmRef.current.play();
+            break;
+          default:
+            // allow playing raw Howl refs by key if you expand mapping
+            break;
+        }
+      } catch (err) {
+        // avoid crashing the app if playback fails
+        // eslint-disable-next-line no-console
+        console.warn("useSound.play error:", err);
       }
-    } catch (err) {
-      // avoid crashing the app if playback fails
-      // eslint-disable-next-line no-console
-      console.warn("useSound.play error:", err);
-    }
-  }, [muted]);
+    },
+    [muted]
+  );
 
   return {
     play, // play('click'|'correct'|'wrong'|'timeout'|'bgm')
