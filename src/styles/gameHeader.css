@@ -1,101 +1,109 @@
-
 .game-header {
-  position: relative;
-  text-align: center;
+    position: relative;
+    text-align: center;
 }
 
 .big-player {
-  font-size: 1.6rem;
-  font-weight: 600;
-  margin-bottom: 10px;
-  color: var(--text, #fff);
+    font-size: 1.6rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: var(--text, #fff);
 }
 
 .bottom-controls {
-  position: fixed;
-  left: 50%;
-  bottom: 35px;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 12px;
-  justify-content: center;
-  align-items: center;
-  flex-wrap: wrap;
-  z-index: 20;
-  padding: 8px 12px;
-  border-radius: 12px;
-  backdrop-filter: blur(6px);
-  background: rgba(0, 0, 0, 0.35);
+    position: fixed;
+    left: 50%;
+    bottom: 35px;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    z-index: 20;
+    padding: 8px 12px;
+    border-radius: 12px;
+    backdrop-filter: blur(6px);
+    background: rgba(0, 0, 0, 0.35);
 }
 
 .emoji-dropdown {
-  position: relative;        
-  display: inline-block;
-  z-index: 200;            
+    position: relative;
+    display: inline-block;
+    z-index: 200;
 }
 
 .bottom-controls {
-  overflow: visible;      
+    overflow: visible;
 }
 
 .emoji-menu {
-  position: fixed; 
-  transform-origin: 50% 100%;
-  padding: 8px 10px;
-  gap: 8px;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.56);
-  backdrop-filter: blur(6px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    position: fixed;
+    transform-origin: 50% 100%;
+    padding: 8px 10px;
+    gap: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.56);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 .emoji-menu.show {
-  transform: translateX(-50%) scale(1);
-  opacity: 1;
+    transform: translateX(-50%) scale(1);
+    opacity: 1;
 }
 
 .emoji-btn {
-  font-size: 20px;
-  padding: 6px;
-  border-radius: 8px;
-  min-width: 40px;
-  border: none;
-  background: rgba(255,255,255,0.03);
-  cursor: pointer;
-  transition: transform 120ms, background 120ms;
+    font-size: 20px;
+    padding: 6px;
+    border-radius: 8px;
+    min-width: 40px;
+    border: none;
+    background: rgba(255, 255, 255, 0.03);
+    cursor: pointer;
+    transition:
+        transform 120ms,
+        background 120ms;
 }
-.emoji-btn:hover { transform: translateY(-3px); background: rgba(255,255,255,0.06); }
+.emoji-btn:hover {
+    transform: translateY(-3px);
+    background: rgba(255, 255, 255, 0.06);
+}
 
 @media (max-width: 420px) {
-  .emoji-menu { left: 50%; width: calc(100vw - 32px); transform: translateX(-50%); }
+    .emoji-menu {
+        left: 50%;
+        width: calc(100vw - 32px);
+        transform: translateX(-50%);
+    }
 }
 
 .game-stats {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
 }
 
 .waiting-header {
-  margin-top: 10px;
-  text-align: center;
+    margin-top: 10px;
+    text-align: center;
 }
 
 .turn-status {
-  font-size: 1.1rem;
-  margin-bottom: 6px;
+    font-size: 1.1rem;
+    margin-bottom: 6px;
 }
 
 .waiting-time {
-  font-size: 2.4rem;
-  font-weight: 600;
+    font-size: 2.4rem;
+    font-weight: 600;
 }
 
 .time-critical {
-  color: #ff4f4f;
+    color: #ff4f4f;
 }

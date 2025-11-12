@@ -42,12 +42,12 @@ app.get("/admin/clients", (_req, res) => {
                       rounds: r.rounds,
                       turnCount: r.turnCount,
                       currentProblem: {
-                        digits: r.currentProblem?.digits,
-                        operators: r.currentProblem?.operators,
-                        disabledOps: r.currentProblem?.disabledOps,
-                        target: r.currentProblem?.target,
-                        solutionExpr: r.currentProblem?.solutionExpr,
-                        solutionResult: r.currentProblem?.solutionResult,
+                          digits: r.currentProblem?.digits,
+                          operators: r.currentProblem?.operators,
+                          disabledOps: r.currentProblem?.disabledOps,
+                          target: r.currentProblem?.target,
+                          solutionExpr: r.currentProblem?.solutionExpr,
+                          solutionResult: r.currentProblem?.solutionResult,
                       },
                   }
                 : null,
@@ -269,7 +269,9 @@ function nextTurn(mode) {
         const nextSocketId = findSocketIdByNickname(nextPlayer);
         if (nextSocketId) {
             io.to(nextSocketId).emit("yourTurn", { mode });
-            console.log(`📣 [${mode}] yourTurn emitted to socket ${nextSocketId} (${nextPlayer})`);
+            console.log(
+                `📣 [${mode}] yourTurn emitted to socket ${nextSocketId} (${nextPlayer})`
+            );
         } else {
             console.log(`⚠️ [${mode}] No socket found for next player ${nextPlayer}`);
         }
@@ -391,7 +393,9 @@ io.on("connection", (socket) => {
                 const firstSocketId = findSocketIdByNickname(shuffled[0]);
                 if (firstSocketId) {
                     io.to(firstSocketId).emit("yourTurn", { mode });
-                    console.log(`📣 [${mode}] yourTurn -> ${firstSocketId} (${shuffled[0]})`);
+                    console.log(
+                        `📣 [${mode}] yourTurn -> ${firstSocketId} (${shuffled[0]})`
+                    );
                 }
 
                 scheduleAutoSwitch(mode, gameRooms[mode].mode === "hard" ? 30 : 60);
