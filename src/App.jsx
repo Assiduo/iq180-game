@@ -496,6 +496,7 @@ export default function App() {
                         checkAnswer={checkAnswer}
                         fade={fade}
                         target={target}
+                        problemRef={problemRef}  
                     />
                 )}
 

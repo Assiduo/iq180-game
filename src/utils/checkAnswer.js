@@ -106,6 +106,7 @@ export async function handleCheckAnswer({
             mode,
             result: outcome.result,
             correct: outcome.correct,
+            solutionExpr: outcome.solutionExpr,
             score: outcome.correct ? score + 1 : score,
             round: rounds + 1,
         });

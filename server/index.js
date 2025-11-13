@@ -418,40 +418,30 @@ io.on("connection", (socket) => {
         const room = gameRooms[data.mode];
         if (!room) return;
 
-        const isHard = data.mode === "hard";
-        let correct = false;
-        let correctExpr = null;
-        let correctResult = null;
+        const problem = room.currentProblem;
+        const correctExpr = problem?.solutionExpr || problem?.expr || null;
+        const correctResult = problem?.solutionResult || problem?.target || null;
 
-        if (isHard && room.currentProblem) {
-            const expr = room.currentProblem.expr;
-            const clean = expr
-                .replace(/×/g, "*")
-                .replace(/÷/g, "/")
-                .replace(/√(\d+|\([^()]+\))/g, "Math.sqrt($1)");
-            try {
-                const evalResult = eval(clean);
-                correctExpr = expr;
-                correctResult = evalResult;
-                correct = Math.abs(evalResult - data.result) < 1e-9;
-            } catch (err) {
-                console.error("❌ Server-side validation error:", err);
+        // compute correctness
+        let correct = false;
+        try {
+            if (data.result != null) {
+                correct = Math.abs(data.result - correctResult) < 1e-9;
             }
-        } else {
-            correct = !!data.correct;
-        }
+        } catch {}
 
         io.to(data.mode).emit("answerResult", {
             ...data,
             correct,
-            solutionExpr: correctExpr,
+            solutionExpr: correctExpr,       // ⭐ ALWAYS SEND SOLUTION
             solutionResult: correctResult,
         });
 
         console.log(
-            `✅ [${data.mode}] answerResult from ${data.nickname} -> correct=${correct} | round=${room.rounds} | solution=${room.currentProblem?.solutionExpr} = ${room.currentProblem?.solutionResult}`
+            `✅ [${data.mode}] answerResult: ${data.nickname} | correct=${correct} | solution=${correctExpr} = ${correctResult}`
         );
     });
+
 
     socket.on("playerLeftGame", ({ nickname, mode }) => {
         const room = gameRooms[mode];

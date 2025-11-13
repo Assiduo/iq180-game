@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { io } from "socket.io-client";
 import { generateProblem } from "../utils/problemGenerator";
 
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://10.203.228.80:4000";
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://172.20.10.2:4000";
 const socket = io(SERVER_URL, {
     autoConnect: true,
     transports: ["websocket", "polling"],

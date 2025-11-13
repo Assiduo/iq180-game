@@ -41,6 +41,7 @@ export default function GamePage({
     checkAnswer,
     fade,
     target,
+    problemRef,
 }) {
     return (
         <motion.div key="game" className="game-page" {...fade}>
@@ -91,6 +92,7 @@ export default function GamePage({
                 stopTimer={stopTimer}
                 setPage={setPage}
                 endByName={endByName}
+                problemRef={problemRef}
             />
         </motion.div>
     );
